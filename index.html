@@ -6,6 +6,7 @@
 <title>Peluquería Carranza – Turnos</title>
 <meta name="color-scheme" content="light dark">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://SUPABASE_REF.supabase.co" crossorigin>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -98,6 +99,9 @@ main.wrap{flex:1;padding-top:28px;padding-bottom:56px}
 .res-total{display:flex;justify-content:space-between;align-items:baseline;padding-top:14px;margin-top:6px;border-top:1px solid var(--line)}
 .res-total strong{font-family:var(--font-display);font-size:2rem;letter-spacing:-.02em}
 .resumen-card .btn-lg{width:100%;margin-top:16px}
+.spin{display:inline-block;width:16px;height:16px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:girar .7s linear infinite;vertical-align:-3px}
+@keyframes girar{to{transform:rotate(360deg)}}
+#cargando .spin{width:28px;height:28px;color:var(--accent)}
 .res-nota{font-size:.78rem;color:var(--ink-3);text-align:center;margin-top:10px}
 
 /* ---------- Tarjetas de paso (fieldset) ---------- */
@@ -323,6 +327,9 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
 </header>
 
 <main class="wrap">
+<div id="offline" class="banner" hidden>Sin conexión con el servidor. Los horarios pueden no estar actualizados; reintentamos solos.</div>
+<div id="cargando" class="estado-vacio" style="margin-top:40px"><span class="spin" aria-hidden="true"></span><strong>Cargando agenda…</strong></div>
+<div id="app" hidden>
 <!-- ===================== RESERVAR ===================== -->
 <section id="v-reservar">
   <div class="hero">
@@ -374,7 +381,7 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
     <h3>Tu reserva</h3>
     <div id="resumen"></div>
     <button type="submit" form="f-reserva" id="btn-reservar" class="btn-lg">Confirmar turno</button>
-    <p class="res-nota">Sin pago por adelantado · Cancelás gratis hasta 2 h antes</p>
+    <p class="res-nota" id="res-nota"></p>
   </aside>
   </div>
 
@@ -442,7 +449,7 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
       <button type="button" id="btn-logout">Cerrar sesión</button>
     </div>
 
-    <details open><summary><b>Reloj simulado</b> (para probar recordatorios y vencimientos)</summary>
+    <details><summary><b>Reloj simulado</b> (solo para pruebas: afecta a TODOS los usuarios)</summary>
       <p id="adm-reloj"></p>
       <button type="button" data-reloj="3600000">+1 hora</button>
       <button type="button" data-reloj="21600000">+6 horas</button>
@@ -563,48 +570,33 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
   </div>
 </section>
 
+</div>
 </main>
 <footer><div class="wrap"><span id="pie">© Peluquería Carranza</span><span>Turnos online · Lun a Sáb</span></div></footer>
 <div id="toasts" aria-live="polite"></div>
 
+<!-- URL de la API (Edge Function de Supabase). Es pública: la seguridad está en el servidor. -->
+<script>window.TURNOS_API_URL = 'https://SUPABASE_REF.supabase.co/functions/v1/turnos';</script>
+<!-- Motor de agenda compartido con el servidor -->
+<script src="supabase/functions/turnos/motor.js"></script>
 <script>
 'use strict';
 /* =====================================================================
-   PELUQUERÍA CARRANZA — Sistema de turnos (todo en un archivo)
-   Secciones:
-     1. Utilidades          6. Lista de espera
-     2. Persistencia        7. Notificaciones + scheduler (tick)
-     3. Datos iniciales     8. Admin (bloqueos, stats, CRUD)
-     4. Motor de agenda     9. Interfaz (render + eventos)
-     5. Turnos (CRUD)      10. Arranque
+   PELUQUERÍA CARRANZA — INTERFAZ (navegador)
+   La lógica de agenda vive en motor.js (compartido con el servidor).
+   Este archivo solo: pide el estado al servidor, lo dibuja y envía acciones.
+   El servidor (Supabase Edge Function) valida y guarda TODO.
    ===================================================================== */
-
-/* ============ 1. UTILIDADES ============ */
-const KEY = 'carranza_turnos_v1';
+const API_URL = window.TURNOS_API_URL;
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
-const pad = n => String(n).padStart(2, '0');
-const toMin = hhmm => { if (!hhmm) return null; const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
-const toHHMM = m => pad(Math.floor(m / 60)) + ':' + pad(m % 60);
-const money = n => '$' + Math.round(n || 0).toLocaleString('es-AR');
-const DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-const OCUPAN = ['confirmada', 'completada'];          // estados que ocupan lugar en la agenda
-const solapa = (a1, a2, b1, b2) => a1 < b2 && b1 < a2;  // intervalos [a1,a2) y [b1,b2)
-const normTel = t => String(t || '').replace(/\D/g, '');
 
-// Reloj simulable: todo el sistema usa ahora() en vez de new Date()
-const ahora = () => new Date(Date.now() + (DB.config.relojOffsetMs || 0));
-const fechaStr = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-const parseFecha = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
-const sumarDias = (s, n) => { const d = parseFecha(s); d.setDate(d.getDate() + n); return fechaStr(d); };
-const diaSemana = s => parseFecha(s).getDay();
-const turnoDate = t => { const d = parseFecha(t.fecha); d.setMinutes(t.inicio); return d; };
-const fechaLarga = s => parseFecha(s).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-const fechaHora = iso => new Date(iso).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
-const staffNombre = id => (DB.staff.find(s => s.id === id) || { nombre: '(eliminado)' }).nombre;
-const getTurno = id => { const t = DB.turnos.find(x => x.id === id); if (!t) throw new Error('Turno inexistente'); return t; };
+let DB = null;                                   // foto del estado que manda el servidor
+let PIN = sessionStorage.getItem('carranza_pin') || '';
+let cuponesValidados = [];                        // cupones que el servidor confirmó (el público no ve la lista)
+const turnosConocidos = {};                       // turnos completos del propio cliente (para .ics, WhatsApp)
+let reprog = null;                                // { id, codigo, tel } mientras se reprograma
+let misTurnos = null, miEspera = null;            // resultados de las búsquedas por teléfono
 
 function descargar(nombre, contenido, tipo) {
   const url = URL.createObjectURL(new Blob([contenido], { type: tipo }));
@@ -613,477 +605,11 @@ function descargar(nombre, contenido, tipo) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/* ============ 2. PERSISTENCIA (LocalStorage) ============ */
-let DB;
-function load() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) return migrar(JSON.parse(raw));
-  } catch (e) { console.warn('No se pudo leer LocalStorage, uso datos iniciales', e); }
-  return seed();
-}
-// Completa campos que falten si el esquema creció (versiones viejas guardadas)
-function migrar(d) {
-  const s = seed();
-  for (const k of Object.keys(s)) if (d[k] === undefined) d[k] = s[k];
-  d.config = { ...s.config, ...d.config };
-  d.turnos.forEach(t => { t.recordatorios ||= { largo: false, corto: false }; t.historial ||= []; });
-  return d;
-}
-function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(DB)); }
-  catch (e) { console.warn('No se pudo guardar (modo privado o almacenamiento lleno)', e); }
-}
-// Re-lee el estado justo antes de una escritura importante (otra pestaña pudo reservar)
-function recargar() { DB = load(); }
-// Sincronización entre pestañas abiertas
-window.addEventListener('storage', e => { if (e.key === KEY) { DB = load(); renderAll(); } });
-
-function auditar(accion) {
-  DB.auditoria.unshift({ en: ahora().toISOString(), accion });
-  DB.auditoria.length = Math.min(DB.auditoria.length, 300);
-}
-
-/* ============ 3. DATOS INICIALES ============ */
-function seed() {
-  return {
-    version: 1,
-    seq: 1000,
-    config: {
-      apertura: '09:00', cierre: '20:00',
-      almuerzoDesde: '13:00', almuerzoHasta: '14:00',
-      diasLaborales: [1, 2, 3, 4, 5, 6],
-      paso: 15,                  // cada cuántos minutos arranca un turno posible
-      buffer: 5,                 // minutos de limpieza entre turnos del mismo profesional
-      anticipacionMinMin: 60,    // no se puede reservar con menos de 60 min
-      maxDiasAdelanto: 60,
-      horasCancelacion: 2,       // el cliente puede cancelar/reprogramar hasta 2 h antes
-      horasRecordatorio: 24,     // recordatorio largo
-      horasRecordatorio2: 2,     // recordatorio corto
-      minutosOferta: 30,         // tiempo para aceptar un lugar liberado de la lista de espera
-      maxAusencias: 3,           // con 3 "no vino" se bloquea la reserva online
-      usarAlert: false,          // además del toast visual, abrir alert() nativo
-      autoCompletar: true,
-      pin: '1234',
-      relojOffsetMs: 0
-    },
-    servicios: [
-      { id: 'corte',    nombre: 'Corte',           precio: 8000,  duracion: 30,  activo: true },
-      { id: 'barba',    nombre: 'Barba',           precio: 4000,  duracion: 20,  activo: true },
-      { id: 'lavado',   nombre: 'Lavado',          precio: 2500,  duracion: 15,  activo: true },
-      { id: 'color',    nombre: 'Color',           precio: 25000, duracion: 90,  activo: true },
-      { id: 'mechas',   nombre: 'Mechas',          precio: 35000, duracion: 120, activo: true },
-      { id: 'peinado',  nombre: 'Peinado',         precio: 9000,  duracion: 45,  activo: true },
-      { id: 'alisado',  nombre: 'Alisado',         precio: 40000, duracion: 150, activo: true },
-      { id: 'infantil', nombre: 'Corte infantil',  precio: 6000,  duracion: 25,  activo: true }
-    ],
-    staff: [
-      { id: 's1', nombre: 'Jorge', dias: [1, 2, 3, 4, 5, 6], desde: '09:00', hasta: '18:00',
-        servicios: ['corte', 'barba', 'lavado', 'infantil'], activo: true },
-      { id: 's2', nombre: 'Lucía', dias: [2, 3, 4, 5, 6], desde: '10:00', hasta: '20:00',
-        servicios: ['corte', 'lavado', 'color', 'mechas', 'peinado', 'alisado'], activo: true },
-      { id: 's3', nombre: 'Matías', dias: [1, 3, 5, 6], desde: '09:00', hasta: '17:00',
-        servicios: ['corte', 'barba', 'lavado', 'color', 'infantil'], activo: true }
-    ],
-    turnos: [],
-    bloqueos: [],        // {id, fecha, staffId|null, desde|null, hasta|null, motivo}
-    espera: [],          // lista de espera
-    cupones: [
-      { codigo: 'BIENVENIDA10', pct: 10, activo: true, dias: null, usosMax: null, usos: 0 },
-      { codigo: 'MARTES20', pct: 20, activo: true, dias: [2], usosMax: null, usos: 0 }
-    ],
-    clientes: {},        // overrides manuales: { tel: 'bloqueado' | 'permitido' }
-    notificaciones: [],
-    auditoria: []
-  };
-}
-
-/* ============ 4. MOTOR DE AGENDA ============ */
-function staffCapaz(st, ids) { return st.activo && ids.length > 0 && ids.every(id => st.servicios.includes(id)); }
-
-function calcular(ids, cupon, fecha) {
-  const sv = ids.map(id => DB.servicios.find(s => s.id === id)).filter(Boolean);
-  const duracion = sv.reduce((a, s) => a + Number(s.duracion), 0);
-  const subtotal = sv.reduce((a, s) => a + Number(s.precio), 0);
-  const cup = validarCupon(cupon, fecha);
-  const descuento = cup && cup.ok ? Math.round(subtotal * cup.pct / 100) : 0;
-  return { servicios: sv, duracion, subtotal, descuento, total: subtotal - descuento, cupon: cup };
-}
-
-function validarCupon(codigo, fecha) {
-  codigo = String(codigo || '').trim().toUpperCase();
-  if (!codigo) return null;
-  const c = DB.cupones.find(x => x.codigo === codigo);
-  if (!c || !c.activo) return { ok: false, msg: 'Cupón inválido o inactivo' };
-  if (c.usosMax && c.usos >= c.usosMax) return { ok: false, msg: 'Cupón agotado' };
-  if (c.dias && c.dias.length && fecha && !c.dias.includes(diaSemana(fecha)))
-    return { ok: false, msg: 'Cupón válido solo los ' + c.dias.map(d => DIAS[d]).join(', ') };
-  return { ok: true, codigo: c.codigo, pct: c.pct };
-}
-
-// ¿El día está cerrado para el local o para ese profesional? Devuelve el motivo o null.
-function motivoDiaCerrado(fecha, st, ignorarRango) {
-  const hoy = fechaStr(ahora());
-  if (!ignorarRango) {
-    if (fecha < hoy) return 'Esa fecha ya pasó.';
-    if (fecha > sumarDias(hoy, DB.config.maxDiasAdelanto)) return `Solo se reserva hasta ${DB.config.maxDiasAdelanto} días adelante.`;
-  }
-  const dw = diaSemana(fecha);
-  if (!DB.config.diasLaborales.includes(dw)) return 'La peluquería no abre los ' + DIAS[dw] + '.';
-  const fer = DB.bloqueos.find(b => b.fecha === fecha && !b.staffId && b.desde == null);
-  if (fer) return 'Cerrado: ' + fer.motivo;
-  if (st) {
-    if (!st.dias.includes(dw)) return st.nombre + ' no trabaja los ' + DIAS[dw] + '.';
-    const b = DB.bloqueos.find(b => b.fecha === fecha && b.staffId === st.id && b.desde == null);
-    if (b) return st.nombre + ' no atiende ese día: ' + b.motivo;
-  }
-  return null;
-}
-
-// Intervalos ocupados de un profesional en un día: [inicio, fin, motivo]
-// excl.turnoId: ignora ese turno (para reprogramar); excl.ofertaId: ignora esa retención de lista de espera
-function ocupaciones(fecha, staffId, excl = {}) {
-  const c = DB.config, out = [];
-  if (c.almuerzoDesde && c.almuerzoHasta) out.push([toMin(c.almuerzoDesde), toMin(c.almuerzoHasta), 'almuerzo']);
-  DB.bloqueos.filter(b => b.fecha === fecha && b.desde != null && (!b.staffId || b.staffId === staffId))
-    .forEach(b => out.push([toMin(b.desde), toMin(b.hasta), 'bloqueado']));
-  DB.turnos.filter(t => t.fecha === fecha && t.staffId === staffId && OCUPAN.includes(t.estado) && t.id !== excl.turnoId)
-    .forEach(t => out.push([t.inicio, t.fin, 'reservado']));
-  const now = ahora();
-  DB.espera.filter(e => e.estado === 'ofertada' && e.fecha === fecha && e.oferta.staffId === staffId &&
-                        e.id !== excl.ofertaId && new Date(e.oferta.vence) > now)
-    .forEach(e => out.push([e.oferta.inicio, e.oferta.inicio + e.duracion, 'retenido']));
-  return out;
-}
-
-// Grilla de horarios de UN profesional para una duración dada
-function slotsStaff(fecha, st, dur, excl = {}) {
-  const cerrado = motivoDiaCerrado(fecha, st);
-  if (cerrado) return { cerrado, slots: [] };
-  const c = DB.config;
-  const ini = Math.max(toMin(c.apertura), toMin(st.desde));
-  const fin = Math.min(toMin(c.cierre), toMin(st.hasta));
-  const occ = ocupaciones(fecha, st.id, excl);
-  const now = ahora();
-  const limite = fecha === fechaStr(now) ? now.getHours() * 60 + now.getMinutes() + Number(c.anticipacionMinMin) : -1;
-  const buf = Number(c.buffer) || 0;
-  const slots = [];
-  for (let t = ini; t + dur <= fin; t += Number(c.paso)) {
-    let motivo = null;
-    if (t < limite) motivo = 'pasado';
-    else for (const [a, b, m] of occ) {
-      // contra otros turnos se exige además el margen de limpieza (buffer) a ambos lados
-      const extra = (m === 'reservado' || m === 'retenido') ? buf : 0;
-      if (solapa(t, t + dur + extra, a, b + extra)) { motivo = m; break; }
-    }
-    slots.push({ t, libre: !motivo, motivo });
-  }
-  return { cerrado: null, slots };
-}
-
-// "Cualquier profesional": une las grillas de todos los que pueden hacer esos servicios
-function slotsCualquiera(fecha, ids, dur, excl) {
-  const capaces = DB.staff.filter(s => staffCapaz(s, ids));
-  if (!capaces.length) return { cerrado: 'Ningún profesional realiza esa combinación de servicios.', slots: [] };
-  const mapa = new Map(); let primerMotivo = null;
-  for (const st of capaces) {
-    const r = slotsStaff(fecha, st, dur, excl);
-    if (r.cerrado) { primerMotivo ||= r.cerrado; continue; }
-    for (const s of r.slots) {
-      if (!mapa.has(s.t)) mapa.set(s.t, { t: s.t, opciones: [], motivos: [] });
-      const e = mapa.get(s.t);
-      s.libre ? e.opciones.push(st.id) : e.motivos.push(s.motivo);
-    }
-  }
-  if (!mapa.size) return { cerrado: primerMotivo || 'Sin disponibilidad.', slots: [] };
-  const slots = [...mapa.values()].sort((a, b) => a.t - b.t).map(e => ({
-    t: e.t, opciones: e.opciones, libre: e.opciones.length > 0,
-    motivo: e.opciones.length ? null : (e.motivos.some(m => m === 'reservado' || m === 'retenido') ? 'reservado' : e.motivos[0])
-  }));
-  return { cerrado: null, slots };
-}
-
-function calcularSlots(fecha, ids, staffSel, excl = {}) {
-  const dur = calcular(ids).duracion;
-  if (staffSel === 'any') return slotsCualquiera(fecha, ids, dur, excl);
-  const st = DB.staff.find(s => s.id === staffSel);
-  if (!st || !staffCapaz(st, ids)) return { cerrado: 'Ese profesional no realiza todos los servicios elegidos.', slots: [] };
-  const r = slotsStaff(fecha, st, dur, excl);
-  r.slots.forEach(s => s.opciones = s.libre ? [st.id] : []);
-  return r;
-}
-
-// Balanceo de carga: con "cualquiera" se asigna al profesional con menos minutos reservados ese día
-function elegirBalanceado(fecha, opciones) {
-  const carga = id => DB.turnos.filter(t => t.fecha === fecha && t.staffId === id && OCUPAN.includes(t.estado))
-                               .reduce((a, t) => a + t.duracion, 0);
-  return [...opciones].sort((a, b) => carga(a) - carga(b))[0];
-}
-
-function primerTurnoLibre(ids, staffSel, excl) {
-  const hoy = fechaStr(ahora());
-  for (let d = 0; d <= DB.config.maxDiasAdelanto; d++) {
-    const f = sumarDias(hoy, d);
-    const r = calcularSlots(f, ids, staffSel, excl);
-    const s = r.slots.find(x => x.libre);
-    if (s) return { fecha: f, t: s.t };
-  }
-  return null;
-}
-
-/* ============ 5. TURNOS ============ */
-function validarCliente(nombre, telefono, email) {
-  nombre = String(nombre || '').trim();
-  const tel = normTel(telefono);
-  if (nombre.length < 2) throw new Error('Ingresá tu nombre.');
-  if (tel.length < 8 || tel.length > 15) throw new Error('Teléfono inválido (de 8 a 15 dígitos).');
-  email = String(email || '').trim();
-  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('Email inválido.');
-  return { nombre, telefono: tel, email };
-}
-
-function estadoCliente(tel) {
-  const ts = DB.turnos.filter(t => t.cliente.telefono === tel);
-  const ausencias = ts.filter(t => t.estado === 'ausente').length;
-  const override = DB.clientes[tel];
-  const bloqueado = override === 'bloqueado' || (override !== 'permitido' && ausencias >= DB.config.maxAusencias);
-  return { ausencias, bloqueado, override, turnos: ts };
-}
-
-// Un mismo cliente no puede tener dos turnos superpuestos (aunque sea con distintos profesionales)
-function verificarChoqueCliente(tel, fecha, ini, fin, excluirId) {
-  const ch = DB.turnos.find(t => t.cliente.telefono === tel && t.estado === 'confirmada' && t.fecha === fecha &&
-                                 t.id !== excluirId && solapa(ini, fin, t.inicio, t.fin));
-  if (ch) throw new Error(`Ya tenés otro turno que se superpone (${ch.codigo} a las ${toHHMM(ch.inicio)}).`);
-}
-
-// Revalida el horario contra el estado actual y devuelve el profesional asignado (o lanza error)
-function resolverHorario(d, excl) {
-  if (!d.serviceIds || !d.serviceIds.length) throw new Error('Elegí al menos un servicio.');
-  if (!d.fecha) throw new Error('Elegí una fecha.');
-  if (!Number.isFinite(d.inicio)) throw new Error('Elegí un horario.');
-  const r = calcularSlots(d.fecha, d.serviceIds, d.staffSel, excl);
-  if (r.cerrado) throw new Error(r.cerrado);
-  const s = r.slots.find(x => x.t === d.inicio);
-  if (!s || !s.libre) throw new Error('Ese horario ya no está disponible (alguien lo tomó o quedó bloqueado). Elegí otro o anotate en la lista de espera.');
-  return d.staffSel === 'any' ? elegirBalanceado(d.fecha, s.opciones) : s.opciones[0];
-}
-
-function marcarRecordatoriosIniciales(t) {
-  // Si se reserva con menos de 24 h, la confirmación ya cumple la función del recordatorio largo
-  const diff = turnoDate(t) - ahora();
-  t.recordatorios = {
-    largo: diff <= DB.config.horasRecordatorio * 36e5,
-    corto: diff <= DB.config.horasRecordatorio2 * 36e5
-  };
-}
-
-function datosTurnoTexto(t) {
-  return `${fechaLarga(t.fecha)} a las ${toHHMM(t.inicio)} con ${staffNombre(t.staffId)} ` +
-         `(${t.servicioNombres.join(' + ')}, ${t.duracion} min, ${money(t.total)}). Código ${t.codigo}.`;
-}
-
-function crearTurno(d, opts = {}) {
-  const cli = validarCliente(d.nombre, d.telefono, d.email);
-  const ec = estadoCliente(cli.telefono);
-  if (ec.bloqueado) throw new Error(`No podemos tomar reservas online para este teléfono (${ec.ausencias} ausencias). Comunicate con el local.`);
-  const calc = calcular(d.serviceIds, d.cupon, d.fecha);
-  if (calc.cupon && !calc.cupon.ok) throw new Error(calc.cupon.msg);
-  const staffId = resolverHorario(d, { ofertaId: opts.ofertaId });
-  verificarChoqueCliente(cli.telefono, d.fecha, d.inicio, d.inicio + calc.duracion, null);
-
-  const t = {
-    id: uid(),
-    codigo: 'PC-' + (++DB.seq),
-    staffId,
-    fecha: d.fecha,
-    inicio: d.inicio,
-    fin: d.inicio + calc.duracion,
-    duracion: calc.duracion,
-    servicioIds: calc.servicios.map(s => s.id),
-    servicioNombres: calc.servicios.map(s => s.nombre),  // "foto" del momento: si cambian precios, el turno no cambia
-    subtotal: calc.subtotal,
-    descuento: calc.descuento,
-    total: calc.total,
-    cupon: calc.cupon && calc.cupon.ok ? calc.cupon.codigo : null,
-    cliente: cli,
-    notas: String(d.notas || '').trim(),
-    estado: 'confirmada',
-    origen: opts.origen || 'web',
-    creado: ahora().toISOString(),
-    recordatorios: { largo: false, corto: false },
-    historial: [{ en: ahora().toISOString(), accion: 'Creado (' + (opts.origen || 'web') + ')' }]
-  };
-  marcarRecordatoriosIniciales(t);
-  DB.turnos.push(t);
-  if (t.cupon) { const c = DB.cupones.find(x => x.codigo === t.cupon); c.usos = (c.usos || 0) + 1; }
-  save();
-  notificar('confirmacion', t.cliente, `¡Hola ${cli.nombre}! Tu turno quedó CONFIRMADO: ${datosTurnoTexto(t)}`);
-  return t;
-}
-
-function verificarPolitica(t, accion) {
-  const h = (turnoDate(t) - ahora()) / 36e5;
-  if (h < DB.config.horasCancelacion)
-    throw new Error(`Solo se puede ${accion} online con al menos ${DB.config.horasCancelacion} h de anticipación. Llamá al local.`);
-}
-
-function cancelarTurno(id, por, motivo) {
-  const t = getTurno(id);
-  if (t.estado !== 'confirmada') throw new Error('Solo se pueden cancelar turnos confirmados.');
-  if (por === 'cliente') verificarPolitica(t, 'cancelar');
-  t.estado = 'cancelada';
-  t.cancelacion = { por, motivo: motivo || '', en: ahora().toISOString() };
-  t.historial.push({ en: ahora().toISOString(), accion: `Cancelado por ${por}${motivo ? ': ' + motivo : ''}` });
-  if (por === 'admin') auditar(`Canceló ${t.codigo} (${motivo || 'sin motivo'})`);
-  save();
-  notificar('cancelacion', t.cliente, `Tu turno ${t.codigo} del ${fechaLarga(t.fecha)} ${toHHMM(t.inicio)} fue CANCELADO${motivo ? ' (' + motivo + ')' : ''}.`);
-  if (por === 'cliente') notificar('aviso_local', { nombre: 'Peluquería', telefono: 'local' }, `El cliente ${t.cliente.nombre} canceló ${t.codigo} (${toHHMM(t.inicio)} con ${staffNombre(t.staffId)}).`);
-  procesarListaEspera(t.fecha);   // ¡se liberó un lugar!
-  return t;
-}
-
-function reprogramarTurno(id, d, por) {
-  const t = getTurno(id);
-  if (t.estado !== 'confirmada') throw new Error('Solo se pueden reprogramar turnos confirmados.');
-  if (por === 'cliente') verificarPolitica(t, 'reprogramar');
-  const calc = calcular(d.serviceIds, t.cupon, d.fecha);
-  const staffId = resolverHorario(d, { turnoId: t.id });   // ignora su propio lugar actual
-  verificarChoqueCliente(t.cliente.telefono, d.fecha, d.inicio, d.inicio + calc.duracion, t.id);
-  const antes = `${t.fecha} ${toHHMM(t.inicio)} ${staffNombre(t.staffId)}`;
-  const fechaAnterior = t.fecha;
-  Object.assign(t, {
-    staffId, fecha: d.fecha, inicio: d.inicio, fin: d.inicio + calc.duracion, duracion: calc.duracion,
-    servicioIds: calc.servicios.map(s => s.id), servicioNombres: calc.servicios.map(s => s.nombre),
-    subtotal: calc.subtotal, descuento: calc.cupon && calc.cupon.ok ? calc.descuento : 0
-  });
-  t.total = t.subtotal - t.descuento;
-  marcarRecordatoriosIniciales(t);
-  t.historial.push({ en: ahora().toISOString(), accion: `Reprogramado por ${por}. Antes: ${antes}` });
-  if (por === 'admin') auditar(`Reprogramó ${t.codigo}`);
-  save();
-  notificar('reprogramacion', t.cliente, `Tu turno fue REPROGRAMADO: ${datosTurnoTexto(t)}`);
-  procesarListaEspera(fechaAnterior);
-  if (fechaAnterior !== t.fecha) procesarListaEspera(t.fecha);
-  return t;
-}
-
-function cambiarEstadoAdmin(id, estado) {
-  const t = getTurno(id);
-  if (estado === 'completada' && t.estado !== 'confirmada') throw new Error('Solo un turno confirmado puede completarse.');
-  if (estado === 'ausente') {
-    if (!['confirmada', 'completada'].includes(t.estado)) throw new Error('Estado inválido para marcar ausencia.');
-    if (turnoDate(t) > ahora()) throw new Error('Todavía no llegó la hora del turno.');
-  }
-  t.estado = estado;
-  t.historial.push({ en: ahora().toISOString(), accion: 'Marcado como ' + estado + ' (admin)' });
-  auditar(`Marcó ${t.codigo} como ${estado}`);
-  save();
-  const ec = estadoCliente(t.cliente.telefono);
-  if (estado === 'ausente' && ec.bloqueado)
-    notificar('aviso_local', { nombre: 'Peluquería', telefono: 'local' }, `${t.cliente.nombre} (${t.cliente.telefono}) quedó BLOQUEADO para reservas online por ${ec.ausencias} ausencias.`);
-}
-
-function generarICS(t) {
-  const d = turnoDate(t), f = new Date(d.getTime() + t.duracion * 60000);
-  const fmt = x => `${x.getFullYear()}${pad(x.getMonth() + 1)}${pad(x.getDate())}T${pad(x.getHours())}${pad(x.getMinutes())}00`;
-  const utc = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Peluqueria Carranza//Turnos//ES', 'BEGIN:VEVENT',
-    `UID:${t.id}@peluqueria-carranza`, `DTSTAMP:${utc}`, `DTSTART:${fmt(d)}`, `DTEND:${fmt(f)}`,
-    `SUMMARY:Peluquería Carranza - ${t.servicioNombres.join(' + ')}`,
-    `DESCRIPTION:Código ${t.codigo} con ${staffNombre(t.staffId)}. Total ${money(t.total)}`,
-    'BEGIN:VALARM', 'TRIGGER:-PT24H', 'ACTION:DISPLAY', 'DESCRIPTION:Turno mañana en Peluquería Carranza', 'END:VALARM',
-    'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
-}
-const linkWhatsApp = t => 'https://wa.me/?text=' + encodeURIComponent('Mi turno en Peluquería Carranza: ' + datosTurnoTexto(t));
-
-/* ============ 6. LISTA DE ESPERA ============ */
-function anotarEnEspera(d) {
-  const cli = validarCliente(d.nombre, d.telefono, d.email);
-  if (!d.serviceIds.length) throw new Error('Elegí servicios primero.');
-  if (!d.fecha) throw new Error('Elegí una fecha.');
-  const cerrado = d.staffSel === 'any' ? null : motivoDiaCerrado(d.fecha, DB.staff.find(s => s.id === d.staffSel));
-  if (cerrado) throw new Error(cerrado);
-  if (estadoCliente(cli.telefono).bloqueado) throw new Error('Este teléfono no puede reservar online. Comunicate con el local.');
-  if (DB.espera.some(e => e.cliente.telefono === cli.telefono && e.fecha === d.fecha && ['esperando', 'ofertada'].includes(e.estado)))
-    throw new Error('Ya estás en la lista de espera para ese día.');
-  const dur = calcular(d.serviceIds).duracion;
-  if (d.desde != null && d.hasta != null && d.hasta - d.desde < dur) throw new Error(`El rango debe abarcar al menos ${dur} min.`);
-  const e = {
-    id: uid(), fecha: d.fecha, staffId: d.staffSel, serviceIds: d.serviceIds, duracion: dur,
-    desde: d.desde, hasta: d.hasta, cliente: cli, estado: 'esperando', creada: ahora().toISOString(), oferta: null
-  };
-  DB.espera.push(e);
-  const pos = DB.espera.filter(x => x.fecha === d.fecha && x.estado === 'esperando').length;
-  save();
-  notificar('espera_alta', cli, `Quedaste en la lista de espera del ${fechaLarga(d.fecha)} (posición ${pos}). Te avisamos si se libera un lugar.`);
-  procesarListaEspera(d.fecha);   // por si justo hay un hueco que le sirve
-  return e;
-}
-
-function buscarHuecoEspera(e) {
-  const cand = DB.staff.filter(s => (e.staffId === 'any' || s.id === e.staffId) && staffCapaz(s, e.serviceIds));
-  for (const st of cand) {
-    const r = slotsStaff(e.fecha, st, e.duracion);
-    if (r.cerrado) continue;
-    const s = r.slots.find(s => s.libre && (e.desde == null || s.t >= e.desde) && (e.hasta == null || s.t + e.duracion <= e.hasta));
-    if (s) return { staffId: st.id, t: s.t };
-  }
-  return null;
-}
-
-// Recorre la lista en orden de llegada (FIFO); a quien le sirva un hueco se le ofrece y se le RETIENE
-function procesarListaEspera(fecha) {
-  const pend = DB.espera.filter(e => e.fecha === fecha && e.estado === 'esperando')
-                        .sort((a, b) => a.creada.localeCompare(b.creada));
-  let n = 0;
-  for (const e of pend) {
-    const h = buscarHuecoEspera(e);
-    if (!h) continue;
-    e.estado = 'ofertada';
-    e.oferta = { staffId: h.staffId, inicio: h.t, vence: new Date(ahora().getTime() + DB.config.minutosOferta * 60000).toISOString() };
-    n++;
-    notificar('espera_oferta', e.cliente, `¡Se liberó un lugar, ${e.cliente.nombre}! ${fechaLarga(e.fecha)} a las ${toHHMM(h.t)} con ${staffNombre(h.staffId)}. ` +
-      `Te lo guardamos ${DB.config.minutosOferta} min: aceptalo en "Lista de espera".`);
-  }
-  if (n) save();
-  return n;
-}
-
-function getEspera(id, tel) {
-  const e = DB.espera.find(x => x.id === id);
-  if (!e || (tel != null && normTel(tel) !== e.cliente.telefono)) throw new Error('Registro de espera no encontrado.');
-  return e;
-}
-
-function aceptarOferta(id, tel) {
-  const e = getEspera(id, tel);
-  if (e.estado !== 'ofertada') throw new Error('No hay una oferta vigente.');
-  if (new Date(e.oferta.vence) <= ahora()) { e.estado = 'expirada'; save(); throw new Error('La oferta venció.'); }
-  const t = crearTurno({ serviceIds: e.serviceIds, staffSel: e.oferta.staffId, fecha: e.fecha, inicio: e.oferta.inicio,
-    nombre: e.cliente.nombre, telefono: e.cliente.telefono, email: e.cliente.email, notas: 'Desde lista de espera', cupon: '' },
-    { ofertaId: e.id, origen: 'lista de espera' });
-  e.estado = 'aceptada'; e.turnoId = t.id;
-  save();
-  return t;
-}
-
-function rechazarOferta(id, tel) {
-  const e = getEspera(id, tel);
-  e.estado = e.estado === 'ofertada' ? 'rechazada' : 'cancelada';
-  save();
-  procesarListaEspera(e.fecha);   // pasa al siguiente en la fila
-}
-
-/* ============ 7. NOTIFICACIONES + SCHEDULER ============ */
-let SILENCIO = false, colaAlert = [];
+/* ---- Toasts y helpers visuales ---- */
 const ETIQUETAS = { confirmacion: 'Confirmación', cancelacion: 'Cancelación', reprogramacion: 'Reprogramación', aviso_local: 'Aviso al local',
   espera_alta: 'Alta en lista de espera', espera_oferta: 'Lugar liberado', espera_expirada: 'Oferta vencida' };
-
-// Toasts: avisos no bloqueantes (reemplazan a alert() en toda la interfaz)
 function avisar(msg, tipo = 'info', titulo) {
-  const box = document.getElementById('toasts');
-  if (!box) return;
+  const box = $('#toasts');
   const el = document.createElement('div');
   el.className = 'toast t-' + tipo;
   el.setAttribute('role', tipo === 'error' ? 'alert' : 'status');
@@ -1092,170 +618,55 @@ function avisar(msg, tipo = 'info', titulo) {
   box.appendChild(el);
   const quitar = () => { el.classList.add('out'); setTimeout(() => el.remove(), 260); };
   el.querySelector('.toast-x').onclick = quitar;
-  setTimeout(quitar, tipo === 'error' ? 8000 : 5500);
+  setTimeout(quitar, tipo === 'error' ? 8000 : 6000);
   while (box.children.length > 5) box.firstChild.remove();
 }
 const avisarOk = m => avisar(m, 'ok');
 const badge = e => `<span class="badge b-${esc(e)}">${esc(e)}</span>`;
 const vacio = (titulo, texto) => `<div class="estado-vacio"><strong>${esc(titulo)}</strong><span>${esc(texto || '')}</span></div>`;
-function notificar(tipo, para, mensaje) {
-  if (SILENCIO) return;
-  const canal = para.email ? 'WhatsApp/SMS + Email' : 'WhatsApp/SMS';
-  const n = { en: ahora().toISOString(), tipo, para: `${para.nombre} <${para.telefono}${para.email ? ' / ' + para.email : ''}>`, canal, mensaje };
-  DB.notificaciones.unshift(n);
-  DB.notificaciones.length = Math.min(DB.notificaciones.length, 500);
-  save();
-  console.log(`%c[${tipo.toUpperCase()}] → ${n.para} vía ${canal}\n${mensaje}`, 'color:#06c;font-weight:bold');
-  if ('Notification' in window && Notification.permission === 'granted') {
-    try { new Notification('Peluquería Carranza · ' + tipo, { body: mensaje }); } catch (e) { /* no soportado */ }
-  }
-  avisar(mensaje, 'notif', `📩 ${ETIQUETAS[tipo] || tipo} → ${para.nombre}`);
-  if (DB.config.usarAlert) {
-    // Se agrupan en un solo alert() para no bloquear la página con 10 ventanas seguidas
-    colaAlert.push(`📩 [${tipo}] para ${para.nombre}:\n${mensaje}`);
-    if (colaAlert.length === 1) setTimeout(() => { const m = colaAlert.splice(0); alert(m.join('\n\n')); }, 60);
-  }
-}
 
-// Se ejecuta cada 15 s y cada vez que se mueve el reloj simulado
-function tick() {
-  const now = ahora(), c = DB.config;
-  let cambio = false;
-  for (const t of DB.turnos) {
-    if (t.estado !== 'confirmada') continue;
-    const diff = turnoDate(t) - now;
-    if (!t.recordatorios.largo && diff > 0 && diff <= c.horasRecordatorio * 36e5) {
-      t.recordatorios.largo = true; cambio = true;
-      notificar('recordatorio_' + c.horasRecordatorio + 'h', t.cliente, `Recordatorio: tenés turno ${datosTurnoTexto(t)} Si no podés venir, cancelá desde "Mis turnos".`);
-    }
-    if (!t.recordatorios.corto && diff > 0 && diff <= c.horasRecordatorio2 * 36e5) {
-      t.recordatorios.corto = true; cambio = true;
-      notificar('recordatorio_' + c.horasRecordatorio2 + 'h', t.cliente, `¡Te esperamos hoy a las ${toHHMM(t.inicio)} con ${staffNombre(t.staffId)}! (${t.codigo})`);
-    }
-    if (c.autoCompletar && diff + t.duracion * 60000 <= 0) {
-      t.estado = 'completada'; cambio = true;
-      t.historial.push({ en: now.toISOString(), accion: 'Completado automáticamente' });
-    }
-  }
-  const hoy = fechaStr(now);
-  for (const e of DB.espera) {
-    if (['esperando', 'ofertada'].includes(e.estado) && e.fecha < hoy) { e.estado = 'expirada'; cambio = true; continue; }
-    if (e.estado === 'ofertada' && new Date(e.oferta.vence) <= now) {
-      e.estado = 'expirada'; cambio = true;
-      notificar('espera_expirada', e.cliente, `Venció el lugar que te reservamos (${toHHMM(e.oferta.inicio)}). Lo ofrecemos al siguiente de la lista.`);
-    }
-  }
-  // Reintentar todas las fechas con gente esperando (por si algo se liberó por cualquier vía)
-  new Set(DB.espera.filter(e => e.estado === 'esperando').map(e => e.fecha))
-    .forEach(f => { if (procesarListaEspera(f)) cambio = true; });
-  if (cambio) save();
-  renderDinamico();
-}
-
-/* ============ 8. ADMIN: bloqueos, feriados, stats ============ */
-function turnosAfectados(b) {
-  return DB.turnos.filter(t => t.estado === 'confirmada' && t.fecha === b.fecha && (!b.staffId || t.staffId === b.staffId) &&
-                               (b.desde == null || solapa(t.inicio, t.fin, toMin(b.desde), toMin(b.hasta))));
-}
-
-// Agrega bloqueos; si pisan turnos confirmados, pregunta si cancelarlos (y avisa a los clientes)
-function agregarBloqueos(lista) {
-  lista = lista.filter(b => !DB.bloqueos.some(x => x.fecha === b.fecha && x.staffId === b.staffId && x.desde === b.desde && x.hasta === b.hasta));
-  if (!lista.length) throw new Error('Esos bloqueos ya existían.');
-  const afectados = [...new Set(lista.flatMap(turnosAfectados))];
-  if (afectados.length) {
-    const ok = confirm(`Hay ${afectados.length} turno(s) confirmados en ese período:\n` +
-      afectados.map(t => `${t.codigo} ${t.fecha} ${toHHMM(t.inicio)} ${t.cliente.nombre}`).join('\n') +
-      `\n\nAceptar = cancelarlos y avisar a los clientes. Cancelar = no agregar el bloqueo.`);
-    if (!ok) return 0;
-  }
-  lista.forEach(b => { b.id = uid(); DB.bloqueos.push(b); });
-  afectados.forEach(t => cancelarTurno(t.id, 'admin', 'Cierre: ' + lista[0].motivo));
-  auditar(`Agregó ${lista.length} bloqueo(s): ${lista[0].motivo}`);
-  save();
-  return lista.length;
-}
-
-function pascua(y) {   // algoritmo de Meeus/Jones/Butcher
-  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4,
-    f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30,
-    i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451),
-    mes = Math.floor((h + l - 7 * m + 114) / 31), dia = ((h + l - 7 * m + 114) % 31) + 1;
-  return fechaStr(new Date(y, mes - 1, dia));
-}
-function feriadosArgentina(y) {
-  const fijos = [['01-01', 'Año Nuevo'], ['03-24', 'Día de la Memoria'], ['04-02', 'Malvinas'], ['05-01', 'Día del Trabajador'],
-    ['05-25', 'Revolución de Mayo'], ['06-20', 'Día de la Bandera'], ['07-09', 'Independencia'],
-    ['12-08', 'Inmaculada Concepción'], ['12-25', 'Navidad']];
-  const p = pascua(y);
-  return [...fijos.map(([md, m]) => ({ fecha: `${y}-${md}`, motivo: m })),
-    { fecha: sumarDias(p, -48), motivo: 'Carnaval' }, { fecha: sumarDias(p, -47), motivo: 'Carnaval' },
-    { fecha: sumarDias(p, -2), motivo: 'Viernes Santo' }]
-    .map(f => ({ ...f, staffId: null, desde: null, hasta: null }));
-}
-
-function minutosDisponibles(fecha, st) {
-  if (motivoDiaCerrado(fecha, st, true)) return 0;
-  const c = DB.config;
-  const ini = Math.max(toMin(c.apertura), toMin(st.desde)), fin = Math.min(toMin(c.cierre), toMin(st.hasta));
-  let total = Math.max(0, fin - ini);
-  const resta = (a, b) => { total -= Math.max(0, Math.min(b, fin) - Math.max(a, ini)); };
-  if (c.almuerzoDesde && c.almuerzoHasta) resta(toMin(c.almuerzoDesde), toMin(c.almuerzoHasta));
-  DB.bloqueos.filter(b => b.fecha === fecha && b.desde != null && (!b.staffId || b.staffId === st.id)).forEach(b => resta(toMin(b.desde), toMin(b.hasta)));
-  return Math.max(0, total);
-}
-
-function generarDemo() {
-  const clientes = ['Ana Gómez', 'Bruno Díaz', 'Carla Ruiz', 'Diego Sosa', 'Elena Paz', 'Facundo Ríos',
-    'Gabriela Luna', 'Hernán Vega', 'Inés Molina', 'Julián Castro'].map((n, i) => ({ nombre: n, telefono: '11' + (40000000 + i * 1111111) }));
-  const rnd = a => a[Math.floor(Math.random() * a.length)];
-  const combo = st => { const base = rnd(st.servicios); const extra = Math.random() < .35 ? rnd(st.servicios) : null;
-    return [...new Set([base, extra].filter(Boolean))].filter(id => DB.servicios.find(s => s.id === id && s.activo)); };
-  const hoy = fechaStr(ahora());
-  let fut = 0, pas = 0;
-  SILENCIO = true;
+/* ---- Comunicación con el servidor ---- */
+async function api(accion, payload = {}) {
+  let r;
   try {
-    for (let d = 0; d < 7; d++) {
-      const f = sumarDias(hoy, d);
-      for (const st of DB.staff.filter(s => s.activo)) for (let k = 0; k < 5; k++) {
-        const ids = combo(st); if (!ids.length) continue;
-        const libres = slotsStaff(f, st, calcular(ids).duracion).slots.filter(s => s.libre);
-        if (!libres.length) break;
-        const c = rnd(clientes);
-        try { crearTurno({ serviceIds: ids, staffSel: st.id, fecha: f, inicio: rnd(libres).t, ...c, email: '', notas: '', cupon: '' }, { origen: 'demo' }); fut++; } catch (e) { /* choque: se saltea */ }
-      }
-    }
-    // Pasado (para estadísticas): se insertan directo, sin validaciones de fecha
-    for (let d = 1; d <= 25; d++) {
-      const f = sumarDias(hoy, -d);
-      if (!DB.config.diasLaborales.includes(diaSemana(f))) continue;
-      for (const st of DB.staff.filter(s => s.activo && s.dias.includes(diaSemana(f)))) {
-        let cur = toMin(st.desde);
-        while (true) {
-          const ids = combo(st); const calc = calcular(ids);
-          cur += Math.round(Math.random() * 4) * DB.config.paso;
-          if (DB.config.almuerzoDesde && solapa(cur, cur + calc.duracion, toMin(DB.config.almuerzoDesde), toMin(DB.config.almuerzoHasta))) cur = toMin(DB.config.almuerzoHasta);
-          if (cur + calc.duracion > toMin(st.hasta)) break;
-          const r = Math.random(), c = rnd(clientes);
-          DB.turnos.push({ id: uid(), codigo: 'PC-' + (++DB.seq), staffId: st.id, fecha: f, inicio: cur, fin: cur + calc.duracion,
-            duracion: calc.duracion, servicioIds: ids, servicioNombres: calc.servicios.map(s => s.nombre), subtotal: calc.subtotal,
-            descuento: 0, total: calc.total, cupon: null, cliente: { ...c, email: '' }, notas: '', origen: 'demo',
-            estado: r < .8 ? 'completada' : r < .88 ? 'ausente' : 'cancelada', creado: new Date(parseFecha(f).getTime() - 3 * 864e5).toISOString(),
-            recordatorios: { largo: true, corto: true }, historial: [{ en: ahora().toISOString(), accion: 'Generado (demo)' }] });
-          pas++;
-          cur += calc.duracion + DB.config.buffer;
-        }
-      }
-    }
-  } finally { SILENCIO = false; }
-  auditar(`Generó datos demo (${fut} futuros, ${pas} pasados)`);
-  save();
-  return { fut, pas };
+    const res = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accion, payload }) });
+    r = await res.json();
+  } catch (e) { throw new Error('No hay conexión con el servidor. Revisá tu internet y probá de nuevo.'); }
+  if (r.estado) aplicarEstado(r.estado);
+  for (const n of r.notifs || []) {
+    avisar(n.mensaje, 'notif', `📩 ${ETIQUETAS[n.tipo] || n.tipo}${n.para ? ' → ' + n.para : ''}`);
+    if ('Notification' in window && Notification.permission === 'granted') { try { new Notification('Peluquería Carranza', { body: n.mensaje }); } catch (e) { /* */ } }
+  }
+  if (!r.ok) throw new Error(r.error || 'Error inesperado.');
+  return r.data || {};
+}
+const adminApi = (op, args = {}) => api('admin', { pin: PIN, op, args });
+function aplicarEstado(e) {
+  if (PIN && e.publico) return;          // con sesión admin no se pisa la foto completa con la pública
+  DB = e;
+  if (e.publico) DB.cupones = cuponesValidados;
+}
+const esAdmin = () => !!PIN && DB && DB.publico === false;
+
+async function refrescar() {
+  try {
+    if (PIN) { try { await adminApi('login'); } catch (e) { cerrarAdmin(); avisar(e.message, 'error'); await api('estado'); } }
+    else await api('estado');
+    $('#offline').hidden = true;
+  } catch (e) { $('#offline').hidden = false; }
+}
+function cerrarAdmin() { PIN = ''; sessionStorage.removeItem('carranza_pin'); }
+
+// Ejecuta una acción con el botón en estado "cargando" y maneja errores
+async function conBoton(btn, fn) {
+  const txt = btn && btn.innerHTML;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Procesando…'; }
+  try { return await fn(); }
+  catch (err) { avisar(err.message, 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = txt; } renderAll(); }
 }
 
-/* ============ 9. INTERFAZ ============ */
-let reprogramandoId = null;
-const esAdmin = () => sessionStorage.getItem('carranza_admin') === '1';
+/* ---- Navegación ---- */
 const VISTAS = ['reservar', 'mis-turnos', 'espera', 'admin'];
 function mostrar(v) {
   if (!VISTAS.includes(v)) v = 'reservar';
@@ -1281,6 +692,7 @@ function renderServicios() {
       <span class="svc-body"><span class="svc-name">${esc(s.nombre)}</span><span class="svc-meta">${s.duracion} min</span></span>
       <span class="svc-price">${money(s.precio)}</span></label>`).join('');
 }
+let cuponPendiente = false;
 function renderResumen() {
   const ids = serviciosElegidos();
   const c = calcular(ids, $('#cupon').value, $('#fecha').value);
@@ -1291,15 +703,19 @@ function renderResumen() {
        <dl class="res-meta">
          <div><dt>Duración</dt><dd>${c.duracion >= 60 ? Math.floor(c.duracion / 60) + ' h ' + (c.duracion % 60 ? c.duracion % 60 + ' min' : '') : c.duracion + ' min'}</dd></div>
          <div><dt>Profesional</dt><dd>${esc(prof ? prof.text.replace(/ \(\d+\)$/, '') : '—')}</dd></div>
-         <div><dt>Fecha</dt><dd>${fecha ? parseFecha(fecha).toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' }) : '—'}</dd></div>
+         <div><dt>Fecha</dt><dd>${fecha ? fechaCorta(fecha) : '—'}</dd></div>
          <div><dt>Hora</dt><dd>${hora ? toHHMM(Number(hora.value)) : '—'}</dd></div>
        </dl>
        ${c.descuento ? `<div class="res-row"><span>Cupón ${esc(c.cupon.codigo)} (−${c.cupon.pct}%)</span><span>−${money(c.descuento)}</span></div>` : ''}
        <div class="res-total"><span class="muted">Total</span><strong>${money(c.total)}</strong></div>`
     : vacio('Tu reserva está vacía', 'Elegí uno o más servicios para ver precio y duración.');
-  $('#btn-reservar').disabled = !(ids.length && hora);
-  $('#btn-reservar').textContent = reprogramandoId ? 'Confirmar nuevo horario' : 'Confirmar turno';
-  $('#cupon-info').textContent = c.cupon ? (c.cupon.ok ? `✔ ${c.cupon.pct}% de descuento` : '✖ ' + c.cupon.msg) : '';
+  const btn = $('#btn-reservar');
+  if (!btn.querySelector('.spin')) {
+    btn.disabled = !(ids.length && hora);
+    btn.textContent = reprog ? 'Confirmar nuevo horario' : 'Confirmar turno';
+  }
+  $('#cupon-info').textContent = cuponPendiente ? 'Verificando…' : c.cupon ? (c.cupon.ok ? `✔ ${c.cupon.pct}% de descuento` : '✖ ' + c.cupon.msg) : '';
+  $('#res-nota').textContent = `Sin pago por adelantado · Cancelás gratis hasta ${DB.config.horasCancelacion} h antes`;
 }
 function renderStaffSelect() {
   const ids = serviciosElegidos(), sel = $('#sel-staff'), prev = sel.value;
@@ -1325,13 +741,12 @@ function pintarSlots() {
   if (!ids.length) { box.innerHTML = vacio('Primero elegí un servicio', 'Así calculamos cuánto tiempo necesitás.'); return; }
   if (!fecha) { box.innerHTML = vacio('Elegí una fecha'); return; }
   const dur = calcular(ids).duracion;
-  const r = calcularSlots(fecha, ids, $('#sel-staff').value, { turnoId: reprogramandoId });
+  const r = calcularSlots(fecha, ids, $('#sel-staff').value, { turnoId: reprog && reprog.id });
   if (r.cerrado) { box.innerHTML = vacio('Sin atención ese día', r.cerrado + ' Probá "Primer turno libre".'); return; }
   const libres = r.slots.filter(s => s.libre);
-  const llenos = r.slots.filter(s => !s.libre && (s.motivo === 'reservado' || s.motivo === 'retenido'));
   // Agrupa por franja; los ocupados se muestran tachados y sirven para entrar a la lista de espera
   const franjas = [['Mañana', 0, 13 * 60], ['Tarde', 13 * 60, 18 * 60], ['Noche', 18 * 60, 24 * 60]];
-  const visibles = r.slots.filter(s => s.libre || (!reprogramandoId && (s.motivo === 'reservado' || s.motivo === 'retenido')));
+  const visibles = r.slots.filter(s => s.libre || (!reprog && (s.motivo === 'reservado' || s.motivo === 'retenido')));
   let html = libres.length ? '' : vacio('Día completo', 'No quedan horarios libres. Anotate en la lista de espera o probá otro día.');
   let i = 0;
   for (const [nombre, a, b] of franjas) {
@@ -1341,26 +756,40 @@ function pintarSlots() {
       ? `<label class="slot" style="animation-delay:${Math.min(i++ * 12, 400)}ms"><input type="radio" name="hora" value="${s.t}" ${String(s.t) === prev ? 'checked' : ''}>${toHHMM(s.t)}<small>hasta ${toHHMM(s.t + dur)}</small></label>`
       : `<button type="button" class="slot lleno" data-espera="${s.t}" title="Ocupado: tocá para anotarte en la lista de espera">${toHHMM(s.t)}<small>ocupado</small></button>`).join('') + '</div></div>';
   }
-  if (!reprogramandoId)
+  if (!reprog)
     html += `<div class="espera-cta"><span>¿No encontrás horario? Si alguien cancela, te avisamos primero.</span>
       <button type="button" data-espera="dia">Lista de espera para este día</button></div>`;
-  box.innerHTML = html;
+  // Evita parpadeo/animación si no cambió nada (el estado se refresca cada 20 s)
+  if (box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html; }
 }
 function refrescarReserva() { renderStaffSelect(); renderResumen(); renderSlots(); }
 
 $('#lista-servicios').addEventListener('change', refrescarReserva);
 $('#sel-staff').addEventListener('change', refrescarReserva);
 $('#fecha').addEventListener('change', () => { renderResumen(); renderSlots(); });
-$('#cupon').addEventListener('input', renderResumen);
 $('#slots').addEventListener('change', renderResumen);
+let cuponTimer;
+$('#cupon').addEventListener('input', () => {
+  clearTimeout(cuponTimer);
+  const codigo = $('#cupon').value.trim().toUpperCase();
+  if (!codigo || esAdmin() || cuponesValidados.some(c => c.codigo === codigo)) { cuponPendiente = false; renderResumen(); return; }
+  cuponPendiente = true; renderResumen();
+  cuponTimer = setTimeout(async () => {
+    try { const r = await api('cupon', { codigo }); if (r.cupon && !cuponesValidados.some(c => c.codigo === r.cupon.codigo)) cuponesValidados.push(r.cupon); }
+    catch (e) { /* se muestra como inválido */ }
+    if (DB.publico) DB.cupones = cuponesValidados;
+    cuponPendiente = false; renderResumen();
+  }, 450);
+});
 
 $('#btn-primer-libre').addEventListener('click', () => {
   const ids = serviciosElegidos();
   if (!ids.length) return avisar('Elegí servicios primero.');
-  const r = primerTurnoLibre(ids, $('#sel-staff').value, { turnoId: reprogramandoId });
+  const r = primerTurnoLibre(ids, $('#sel-staff').value, { turnoId: reprog && reprog.id });
   if (!r) return avisar('No hay turnos libres en los próximos ' + DB.config.maxDiasAdelanto + ' días.');
   $('#fecha').value = r.fecha; renderResumen(); renderSlots();
   const radio = $(`#slots input[value="${r.t}"]`); if (radio) radio.checked = true;
+  renderResumen();
 });
 
 function datosFormulario() {
@@ -1372,15 +801,22 @@ function datosFormulario() {
     notas: $('#notas').value, cupon: $('#cupon').value
   };
 }
+function recordarDatos() {   // comodidad: el celular recuerda nombre y teléfono para la próxima
+  try { localStorage.setItem('carranza_cliente', JSON.stringify({ nombre: $('#nombre').value, telefono: $('#telefono').value, email: $('#email').value })); } catch (e) { /* */ }
+}
 
 $('#f-reserva').addEventListener('submit', e => {
   e.preventDefault();
-  recargar();   // última versión de la agenda (otra pestaña pudo reservar ese hueco)
-  try {
+  conBoton($('#btn-reservar'), async () => {
     const d = datosFormulario();
-    const t = reprogramandoId ? reprogramarTurno(reprogramandoId, d, esAdmin() ? 'admin' : 'cliente')
-                              : crearTurno(d, { origen: esAdmin() ? 'mostrador' : 'web' });
-    $('#resultado-reserva').innerHTML = `<div class="exito"><h3>Turno ${reprogramandoId ? 'reprogramado' : 'confirmado'}</h3>
+    if (!Number.isFinite(d.inicio)) throw new Error('Elegí un horario.');
+    const eraReprog = !!reprog;
+    const { turno: t } = reprog
+      ? (esAdmin() ? await adminApi('reprogramar', { id: reprog.id, datos: d }) : await api('reprogramar', { ...reprog, datos: d }))
+      : (esAdmin() ? await adminApi('reservar', { datos: d }) : await api('reservar', { datos: d }));
+    turnosConocidos[t.id] = t;
+    recordarDatos();
+    $('#resultado-reserva').innerHTML = `<div class="exito"><h3>Turno ${eraReprog ? 'reprogramado' : 'confirmado'}</h3>
       <p>${esc(datosTurnoTexto(t))}</p>
       <p>Tu código: <span class="codigo">${t.codigo}</span> — lo necesitás para cancelar o reprogramar.</p>
       <div class="acciones"><button type="button" class="btn-primary" data-act="ics" data-id="${t.id}">Agregar a mi calendario</button>
@@ -1390,11 +826,10 @@ $('#f-reserva').addEventListener('submit', e => {
     salirReprog();
     $$('#lista-servicios input').forEach(i => i.checked = false);
     $('#notas').value = ''; $('#cupon').value = '';
-    renderAll();
-  } catch (err) { avisar(err.message, 'error'); renderAll(); }
+  });
 });
 
-function salirReprog() { reprogramandoId = null; $('#modo-reprog').hidden = true; }
+function salirReprog() { reprog = null; $('#modo-reprog').hidden = true; }
 $('#btn-salir-reprog').addEventListener('click', () => { salirReprog(); renderSlots(); });
 
 function abrirEspera(valor) {
@@ -1403,21 +838,20 @@ function abrirEspera(valor) {
   if (valor === 'dia') { $('#esp-desde').value = ''; $('#esp-hasta').value = ''; }
   else { const t = Number(valor); $('#esp-desde').value = toHHMM(t); $('#esp-hasta').value = toHHMM(Math.min(t + dur + 60, 24 * 60 - 1)); }
   $('#espera-desc').textContent = `Día: ${fechaLarga($('#fecha').value)} · Profesional: ${$('#sel-staff').selectedOptions[0].text} · Servicios: ${dur} min.`;
-  $('#f-espera').scrollIntoView();
+  $('#f-espera').scrollIntoView({ block: 'center' });
 }
 $('#btn-cerrar-espera').addEventListener('click', () => { $('#f-espera').hidden = true; });
-$('#btn-confirmar-espera').addEventListener('click', () => {
-  recargar();
-  try {
-    const d = datosFormulario();
-    d.desde = toMin($('#esp-desde').value); d.hasta = toMin($('#esp-hasta').value);
-    const e = anotarEnEspera(d);
-    $('#f-espera').hidden = true;
-    $('#resultado-reserva').innerHTML = `<div class="exito"><h3>Estás en la lista de espera</h3><p>${e.estado === 'ofertada' ? '¡Ya hay un lugar para vos! Aceptalo en <a href="#espera">Lista de espera</a>.' : 'Te avisamos apenas se libere un lugar que te sirva.'}</p></div>`;
-    $('#esp-tel').value = e.cliente.telefono;
-    renderAll();
-  } catch (err) { avisar(err.message, 'error'); }
-});
+$('#btn-confirmar-espera').addEventListener('click', e => conBoton(e.currentTarget, async () => {
+  const d = datosFormulario();
+  d.desde = toMin($('#esp-desde').value); d.hasta = toMin($('#esp-hasta').value);
+  const { espera } = await api('espera_alta', { datos: d });
+  recordarDatos();
+  $('#f-espera').hidden = true;
+  $('#resultado-reserva').innerHTML = `<div class="exito"><h3>Estás en la lista de espera</h3><p>${espera.estado === 'ofertada'
+    ? '¡Ya hay un lugar para vos! Aceptalo en <a href="#espera">Lista de espera</a>.'
+    : `Quedaste en la posición #${espera.posicion}. Te avisamos apenas se libere un lugar que te sirva.`}</p></div>`;
+  $('#esp-tel').value = normTel(d.telefono);
+}));
 
 /* ---- Mis turnos ---- */
 const filaTurnoCliente = t => {
@@ -1427,35 +861,43 @@ const filaTurnoCliente = t => {
     <button type="button" data-act="cli-cancelar" data-id="${t.id}">Cancelar</button>
     <button type="button" data-act="cli-reprog" data-id="${t.id}">Reprogramar</button>
     <button type="button" data-act="ics" data-id="${t.id}">.ics</button>
-    <a href="${linkWhatsApp(t)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}</td></tr>`;
+    <a class="btn" href="${linkWhatsApp(t)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}</td></tr>`;
 };
-function renderMisTurnos() {
+async function buscarMisTurnos() {
   const tel = normTel($('#mis-tel').value);
-  if (!tel) { $('#mis-res').innerHTML = ''; return; }
-  const ec = estadoCliente(tel);
-  const ts = ec.turnos.slice().sort((a, b) => (b.fecha + b.inicio).localeCompare(a.fecha + a.inicio) || b.inicio - a.inicio);
+  if (!tel) return;
+  const r = await api('mis_turnos', { tel });
+  misTurnos = { tel, ...r };
+  r.turnos.forEach(t => { turnosConocidos[t.id] = t; });
+}
+function renderMisTurnos() {
+  if (!misTurnos) { $('#mis-res').innerHTML = ''; return; }
+  const ts = misTurnos.turnos.slice().sort((a, b) => b.fecha.localeCompare(a.fecha) || b.inicio - a.inicio);
   const prox = ts.filter(t => t.estado === 'confirmada' && turnoDate(t) > ahora()).sort((a, b) => turnoDate(a) - turnoDate(b))[0];
   $('#mis-res').innerHTML = !ts.length ? vacio('No encontramos turnos', 'Revisá el número o reservá tu primer turno.') :
     `<div class="kpis">
        <div class="kpi kpi-main"><span>Próximo turno</span><strong>${prox ? toHHMM(prox.inicio) : '—'}</strong><small>${prox ? esc(fechaLarga(prox.fecha)) : 'Sin turnos pendientes'}</small></div>
        <div class="kpi kpi-ok"><span>Visitas</span><strong>${ts.filter(t => t.estado === 'completada').length}</strong><small>completadas</small></div>
-       <div class="kpi ${ec.ausencias ? 'kpi-bad' : ''}"><span>Ausencias</span><strong>${ec.ausencias}</strong><small>${ec.bloqueado ? 'Reserva online bloqueada' : 'de ' + DB.config.maxAusencias + ' permitidas'}</small></div>
+       <div class="kpi ${misTurnos.ausencias ? 'kpi-bad' : ''}"><span>Ausencias</span><strong>${misTurnos.ausencias}</strong><small>${misTurnos.bloqueado ? 'Reserva online bloqueada' : 'de ' + DB.config.maxAusencias + ' permitidas'}</small></div>
      </div>
      <table><tr><th>Código</th><th>Fecha</th><th>Profesional</th><th>Servicios</th><th>Total</th><th>Estado</th><th>Acciones</th></tr>
      ${ts.map(filaTurnoCliente).join('')}</table>
-     <p class="tabla-nota">Podés cancelar o reprogramar hasta ${DB.config.horasCancelacion} h antes.</p>`;
+     <p class="tabla-nota">Podés cancelar o reprogramar hasta ${DB.config.horasCancelacion} h antes. Te vamos a pedir el código del turno.</p>`;
 }
-$('#f-mis').addEventListener('submit', e => { e.preventDefault(); renderMisTurnos(); });
+$('#f-mis').addEventListener('submit', e => { e.preventDefault(); conBoton(e.target.querySelector('button'), buscarMisTurnos); });
 
 /* ---- Lista de espera (cliente) ---- */
-function renderMiEspera() {
+async function buscarMiEspera() {
   const tel = normTel($('#esp-tel').value);
-  if (!tel) { $('#esp-res').innerHTML = ''; return; }
-  const es = DB.espera.filter(e => e.cliente.telefono === tel).sort((a, b) => b.creada.localeCompare(a.creada));
+  if (!tel) return;
+  const r = await api('mi_espera', { tel });
+  miEspera = { tel, lista: r.espera };
+}
+function renderMiEspera() {
+  if (!miEspera) { $('#esp-res').innerHTML = ''; return; }
+  const es = miEspera.lista.slice().sort((a, b) => b.creada.localeCompare(a.creada));
   $('#esp-res').innerHTML = !es.length ? vacio('No estás en ninguna lista de espera', 'Tocá un horario ocupado en "Reservar" para anotarte.') :
     `<table><tr><th>Día</th><th>Rango</th><th>Profesional</th><th>Posición</th><th>Estado</th><th>Acciones</th></tr>${es.map(e => {
-      const fila = DB.espera.filter(x => x.fecha === e.fecha && x.estado === 'esperando').sort((a, b) => a.creada.localeCompare(b.creada));
-      const pos = fila.indexOf(e) + 1;
       const rango = e.desde == null ? 'todo el día' : `${toHHMM(e.desde)}–${toHHMM(e.hasta)}`;
       let acc = '';
       if (e.estado === 'ofertada') acc = `<b>Lugar: ${toHHMM(e.oferta.inicio)} con ${esc(staffNombre(e.oferta.staffId))}</b> (vence ${fechaHora(e.oferta.vence)})
@@ -1463,18 +905,24 @@ function renderMiEspera() {
         <button type="button" data-act="esp-rechazar" data-id="${e.id}">Rechazar</button>`;
       else if (e.estado === 'esperando') acc = `<button type="button" data-act="esp-rechazar" data-id="${e.id}">Salir de la lista</button>`;
       return `<tr><td>${e.fecha}</td><td>${rango}</td><td>${e.staffId === 'any' ? 'Cualquiera' : esc(staffNombre(e.staffId))}</td>
-        <td>${pos > 0 ? '#' + pos : '—'}</td><td>${badge(e.estado)}</td><td>${acc}</td></tr>`;
+        <td>${e.posicion > 0 ? '#' + e.posicion : '—'}</td><td>${badge(e.estado)}</td><td>${acc}</td></tr>`;
     }).join('')}</table>`;
 }
-$('#f-esp-buscar').addEventListener('submit', e => { e.preventDefault(); renderMiEspera(); });
+$('#f-esp-buscar').addEventListener('submit', e => { e.preventDefault(); conBoton(e.target.querySelector('button'), buscarMiEspera); });
 
 /* ---- Admin ---- */
 $('#f-login').addEventListener('submit', e => {
   e.preventDefault();
-  if ($('#pin').value === String(DB.config.pin)) { sessionStorage.setItem('carranza_admin', '1'); $('#pin').value = ''; mostrar('admin'); }
-  else avisar('PIN incorrecto');
+  conBoton(e.target.querySelector('button'), async () => {
+    PIN = $('#pin').value.trim();
+    try { await adminApi('login'); }
+    catch (err) { cerrarAdmin(); throw err; }
+    sessionStorage.setItem('carranza_pin', PIN);
+    $('#pin').value = '';
+    mostrar('admin');
+  });
 });
-$('#btn-logout').addEventListener('click', () => { sessionStorage.removeItem('carranza_admin'); mostrar('admin'); });
+$('#btn-logout').addEventListener('click', async () => { cerrarAdmin(); await refrescar(); renderAll(); mostrar('admin'); });
 
 const CONFIG_CAMPOS = [
   ['apertura', 'time', 'Apertura del local'], ['cierre', 'time', 'Cierre del local'],
@@ -1484,27 +932,27 @@ const CONFIG_CAMPOS = [
   ['horasCancelacion', 'number', 'Horas mínimas para que el cliente cancele/reprograme'],
   ['horasRecordatorio', 'number', 'Recordatorio largo (horas antes)'], ['horasRecordatorio2', 'number', 'Recordatorio corto (horas antes)'],
   ['minutosOferta', 'number', 'Minutos para aceptar un lugar de lista de espera'], ['maxAusencias', 'number', 'Ausencias para bloquear al cliente'],
-  ['usarAlert', 'checkbox', 'Mostrar alert() con cada notificación'], ['autoCompletar', 'checkbox', 'Completar automáticamente turnos pasados'],
-  ['pin', 'text', 'PIN de administrador']
+  ['autoCompletar', 'checkbox', 'Completar automáticamente turnos pasados'],
+  ['pin', 'password', 'Nuevo PIN de administrador (vacío = no cambiar, mínimo 6)']
 ];
 
 function renderAdminEstatico() {
   const c = DB.config;
   $('#cfg-campos').innerHTML = CONFIG_CAMPOS.map(([k, tipo, label]) => tipo === 'checkbox'
     ? `<label><input type="checkbox" name="${k}" ${c[k] ? 'checked' : ''}> ${label}</label>`
-    : `<label>${label} <input type="${tipo}" name="${k}" value="${esc(c[k])}" ${tipo === 'number' ? 'min="0"' : ''}></label>`).join('') +
+    : `<label>${label} <input type="${tipo}" name="${k}" value="${k === 'pin' ? '' : esc(c[k])}" ${tipo === 'number' ? 'min="0"' : ''} ${k === 'pin' ? 'autocomplete="new-password"' : ''}></label>`).join('') +
     '<div class="dias">Días que abre el local: ' + checkboxesDias('cfg-dia', c.diasLaborales) + '</div>';
 
   $('#adm-servicios').innerHTML = `<table><tr><th>Servicio</th><th>Precio</th><th>Minutos</th><th>Estado</th><th></th></tr>${DB.servicios.map(s => `
     <tr data-svc="${s.id}"><td><input name="nombre" value="${esc(s.nombre)}"></td><td><input name="precio" type="number" min="0" value="${s.precio}"></td>
-    <td><input name="duracion" type="number" min="5" step="5" value="${s.duracion}"></td><td>${s.activo ? 'activo' : 'inactivo'}</td>
+    <td><input name="duracion" type="number" min="5" step="5" value="${s.duracion}"></td><td>${badge(s.activo ? 'ok' : 'expirada').replace(/>(ok|expirada)</, '>' + (s.activo ? 'activo' : 'inactivo') + '<')}</td>
     <td><button type="button" data-act="svc-guardar" data-id="${s.id}">Guardar</button>
     <button type="button" data-act="svc-toggle" data-id="${s.id}">${s.activo ? 'Desactivar' : 'Activar'}</button></td></tr>`).join('')}</table>
-    <p>Cambiar precio o duración NO altera turnos ya reservados.</p>`;
+    <p class="tabla-nota">Cambiar precio o duración NO altera turnos ya reservados.</p>`;
 
   $('#adm-staff').innerHTML = `<table><tr><th>Nombre</th><th>Días</th><th>Horario</th><th>Servicios</th><th>Estado</th><th></th></tr>${DB.staff.map(s => `
     <tr><td>${esc(s.nombre)}</td><td>${s.dias.map(d => DIAS[d]).join(', ')}</td><td>${s.desde}–${s.hasta}</td>
-    <td>${s.servicios.map(id => esc((DB.servicios.find(x => x.id === id) || {}).nombre || id)).join(', ')}</td><td>${s.activo ? 'activo' : 'inactivo'}</td>
+    <td>${s.servicios.map(id => esc((DB.servicios.find(x => x.id === id) || {}).nombre || id)).join(', ')}</td><td>${badge(s.activo ? 'ok' : 'expirada').replace(/>(ok|expirada)</, '>' + (s.activo ? 'activo' : 'inactivo') + '<')}</td>
     <td><button type="button" data-act="staff-editar" data-id="${s.id}">Editar</button></td></tr>`).join('')}</table>`;
   if (!$('#stf-id').value) llenarFormStaff(null);
 
@@ -1512,13 +960,13 @@ function renderAdminEstatico() {
   const fs = $('#fil-staff').value; $('#fil-staff').innerHTML = '<option value="">Todos</option>' + opcionesStaff; $('#fil-staff').value = fs;
   const bs = $('#blq-staff').value; $('#blq-staff').innerHTML = '<option value="">Todo el local</option>' + opcionesStaff; $('#blq-staff').value = bs;
 
-  $('#adm-cupones').innerHTML = `<table><tr><th>Código</th><th>%</th><th>Días</th><th>Usos</th><th>Estado</th><th></th></tr>${DB.cupones.map((c, i) => `
+  $('#adm-cupones').innerHTML = `<table><tr><th>Código</th><th>%</th><th>Días</th><th>Usos</th><th>Estado</th><th></th></tr>${DB.cupones.map(c => `
     <tr><td>${esc(c.codigo)}</td><td>${c.pct}%</td><td>${c.dias && c.dias.length ? c.dias.map(d => DIAS[d]).join(', ') : 'todos'}</td>
     <td>${c.usos || 0}${c.usosMax ? ' / ' + c.usosMax : ''}</td><td>${c.activo ? 'activo' : 'inactivo'}</td>
-    <td><button type="button" data-act="cup-toggle" data-id="${i}">${c.activo ? 'Desactivar' : 'Activar'}</button>
-    <button type="button" data-act="cup-borrar" data-id="${i}">Borrar</button></td></tr>`).join('')}</table>`;
+    <td><button type="button" data-act="cup-toggle" data-id="${esc(c.codigo)}">${c.activo ? 'Desactivar' : 'Activar'}</button>
+    <button type="button" data-act="cup-borrar" data-id="${esc(c.codigo)}">Borrar</button></td></tr>`).join('')}</table>`;
   if (!$('#cup-dias').innerHTML) $('#cup-dias').innerHTML = checkboxesDias('cup-dia', []);
-  if (!$('#anio-feriados').value) $('#anio-feriados').value = ahora().getFullYear();
+  if (!$('#anio-feriados').value) $('#anio-feriados').value = ahora().getUTCFullYear();
 }
 
 function llenarFormStaff(st) {
@@ -1535,7 +983,7 @@ function llenarFormStaff(st) {
 function renderAdminDinamico() {
   if (!esAdmin()) return;
   const now = ahora();
-  $('#adm-reloj').innerHTML = `Hora simulada: <b>${now.toLocaleString('es-AR')}</b>${DB.config.relojOffsetMs ? ` (adelantado ${Math.round(DB.config.relojOffsetMs / 36e5)} h)` : ' (hora real)'}`;
+  $('#adm-reloj').innerHTML = `Hora del sistema: <b>${esc(ahoraTexto())}</b>${DB.config.relojOffsetMs ? ` <span class="badge b-ofertada">simulada (${Math.round(DB.config.relojOffsetMs / 36e5)} h)</span>` : ' (hora real de Buenos Aires)'}`;
   if (!$('#adm-fecha').value) $('#adm-fecha').value = fechaStr(now);
   renderResumenDia($('#adm-fecha').value);
   renderHistorial();
@@ -1543,9 +991,9 @@ function renderAdminDinamico() {
   renderBloqueos();
   renderEsperaAdmin();
   renderClientes();
-  $('#adm-notif').innerHTML = `<p>${DB.notificaciones.length} notificaciones (también se ven en la consola del navegador, F12).</p>
+  $('#adm-notif').innerHTML = `<p>${DB.notificaciones.length} notificaciones registradas.</p>
     <table><tr><th>Cuándo</th><th>Tipo</th><th>Para</th><th>Canal</th><th>Mensaje</th></tr>${DB.notificaciones.slice(0, 100).map(n =>
-    `<tr><td>${fechaHora(n.en)}</td><td>${n.tipo}</td><td>${esc(n.para)}</td><td>${n.canal}</td><td>${esc(n.mensaje)}</td></tr>`).join('')}</table>`;
+    `<tr><td>${fechaHora(n.en)}</td><td>${esc(n.tipo)}</td><td>${esc(n.para)}</td><td>${esc(n.canal)}</td><td>${esc(n.mensaje)}</td></tr>`).join('')}</table>`;
   $('#adm-audit').innerHTML = `<table>${DB.auditoria.slice(0, 100).map(a => `<tr><td>${fechaHora(a.en)}</td><td>${esc(a.accion)}</td></tr>`).join('')}</table>`;
 }
 
@@ -1675,98 +1123,88 @@ function renderClientes() {
 
 $('#f-config').addEventListener('submit', e => {
   e.preventDefault();
-  const f = e.target, c = { ...DB.config };
+  const f = e.target, c = {};
   for (const [k, tipo] of CONFIG_CAMPOS) {
     const inp = f.elements[k];
     c[k] = tipo === 'checkbox' ? inp.checked : tipo === 'number' ? Number(inp.value) : inp.value;
   }
   c.diasLaborales = valoresMarcados('input[name="cfg-dia"]').map(Number);
-  if (toMin(c.apertura) >= toMin(c.cierre)) return avisar('La apertura debe ser antes del cierre.');
-  if ((c.almuerzoDesde && !c.almuerzoHasta) || (c.almuerzoDesde && toMin(c.almuerzoDesde) >= toMin(c.almuerzoHasta))) return avisar('Revisá el horario de almuerzo.');
-  if (c.paso < 5) return avisar('El intervalo mínimo es 5 minutos.');
-  if (!String(c.pin).trim()) return avisar('El PIN no puede quedar vacío.');
-  DB.config = c;
-  const hoy = fechaStr(ahora());
-  const fuera = DB.turnos.filter(t => t.estado === 'confirmada' && t.fecha >= hoy &&
-    (!c.diasLaborales.includes(diaSemana(t.fecha)) || t.inicio < toMin(c.apertura) || t.fin > toMin(c.cierre)));
-  auditar('Cambió la configuración');
-  save(); renderAll();
-  avisarOk('Configuración guardada.' + (fuera.length ? `\n\nAtención: ${fuera.length} turno(s) futuros quedan fuera del nuevo horario: ${fuera.map(t => t.codigo).join(', ')}. Se mantienen; revisalos en el historial.` : ''));
+  conBoton(f.querySelector('button'), async () => {
+    const r = await adminApi('config', { config: c });
+    if (r.pinCambiado) { PIN = c.pin.trim(); sessionStorage.setItem('carranza_pin', PIN); }
+    avisarOk('Configuración guardada.' + (r.fuera.length ? `\n\nAtención: ${r.fuera.length} turno(s) futuros quedan fuera del nuevo horario: ${r.fuera.join(', ')}. Se mantienen; revisalos en el historial.` : ''));
+  });
 });
 
 $('#f-servicio').addEventListener('submit', e => {
   e.preventDefault();
-  const nombre = $('#svc-nombre').value.trim();
-  let id = nombre.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || uid();
-  if (DB.servicios.some(s => s.id === id)) id += '-' + uid().slice(0, 4);
-  DB.servicios.push({ id, nombre, precio: Number($('#svc-precio').value), duracion: Number($('#svc-dur').value), activo: true });
-  auditar('Creó servicio ' + nombre);
-  save(); e.target.reset(); renderAll();
-  avisarOk('Servicio creado. Asignáselo a los profesionales que lo hacen (sección Profesionales).');
+  conBoton(e.target.querySelector('button'), async () => {
+    await adminApi('servicio_crear', { nombre: $('#svc-nombre').value, precio: $('#svc-precio').value, duracion: $('#svc-dur').value });
+    e.target.reset();
+    avisarOk('Servicio creado. Asignáselo a los profesionales que lo hacen (sección Profesionales).');
+  });
 });
 
 $('#f-staff').addEventListener('submit', e => {
   e.preventDefault();
-  const id = $('#stf-id').value;
-  const datos = {
-    nombre: $('#stf-nombre').value.trim(),
+  const staff = {
+    id: $('#stf-id').value || null, nombre: $('#stf-nombre').value,
     dias: valoresMarcados('input[name="stf-dia"]').map(Number),
     desde: $('#stf-desde').value, hasta: $('#stf-hasta').value,
-    servicios: valoresMarcados('input[name="stf-svc"]'),
-    activo: $('#stf-activo').checked
+    servicios: valoresMarcados('input[name="stf-svc"]'), activo: $('#stf-activo').checked
   };
-  if (toMin(datos.desde) >= toMin(datos.hasta)) return avisar('El horario de inicio debe ser anterior al de fin.');
-  if (!datos.servicios.length) return avisar('Elegí al menos un servicio.');
-  let st;
-  if (id) { st = DB.staff.find(s => s.id === id); Object.assign(st, datos); }
-  else { st = { id: 's' + uid(), ...datos }; DB.staff.push(st); }
-  const hoy = fechaStr(ahora());
-  const fuera = DB.turnos.filter(t => t.estado === 'confirmada' && t.staffId === st.id && t.fecha >= hoy &&
-    (!st.activo || !st.dias.includes(diaSemana(t.fecha)) || t.inicio < toMin(st.desde) || t.fin > toMin(st.hasta)));
-  auditar((id ? 'Editó' : 'Creó') + ' profesional ' + st.nombre);
-  save(); llenarFormStaff(null); renderAll();
-  if (fuera.length) avisar(`Atención: ${fuera.length} turno(s) futuros de ${st.nombre} quedan fuera de su nueva disponibilidad: ${fuera.map(t => t.codigo).join(', ')}. Cancelalos o reprogramalos desde el historial.`);
+  conBoton(e.target.querySelector('button:not([type=button])'), async () => {
+    const r = await adminApi('staff_guardar', { staff });
+    llenarFormStaff(null);
+    avisarOk('Profesional guardado.');
+    if (r.fuera.length) avisar(`Atención: ${r.fuera.length} turno(s) futuros quedan fuera de su nueva disponibilidad: ${r.fuera.join(', ')}. Cancelalos o reprogramalos desde el historial.`);
+  });
 });
 $('#btn-stf-nuevo').addEventListener('click', () => llenarFormStaff(null));
 
 $('#f-cupon').addEventListener('submit', e => {
   e.preventDefault();
-  const codigo = $('#cup-codigo').value.trim().toUpperCase();
-  if (DB.cupones.some(c => c.codigo === codigo)) return avisar('Ya existe ese código.');
-  const dias = valoresMarcados('input[name="cup-dia"]').map(Number);
-  DB.cupones.push({ codigo, pct: Number($('#cup-pct').value), activo: true, dias: dias.length ? dias : null,
-    usosMax: $('#cup-usos').value ? Number($('#cup-usos').value) : null, usos: 0 });
-  auditar('Creó cupón ' + codigo);
-  save(); e.target.reset(); renderAll();
+  conBoton(e.target.querySelector('button'), async () => {
+    await adminApi('cupon_crear', { codigo: $('#cup-codigo').value, pct: $('#cup-pct').value, usosMax: $('#cup-usos').value,
+      dias: valoresMarcados('input[name="cup-dia"]').map(Number) });
+    e.target.reset(); avisarOk('Cupón creado.');
+  });
 });
 
+// Bloqueos: si pisan turnos, el servidor devuelve los afectados y se pide confirmación
+async function bloquear(op, args) {
+  let r = await adminApi(op, args);
+  if (r.requiereConfirmacion) {
+    if (!confirm(`Hay ${r.afectados.length} turno(s) confirmados en ese período:\n${r.afectados.join('\n')}\n\nAceptar = cancelarlos y avisar a los clientes.\nCancelar = no agregar el bloqueo.`)) return null;
+    r = await adminApi(op, { ...args, forzar: true });
+  }
+  return r;
+}
 $('#f-bloqueo').addEventListener('submit', e => {
   e.preventDefault();
   const desde = $('#blq-desde').value || null, hasta = $('#blq-hasta').value || null;
   if ((desde && !hasta) || (!desde && hasta)) return avisar('Completá desde y hasta, o ninguno (día completo).');
   if (desde && toMin(desde) >= toMin(hasta)) return avisar('"Desde" debe ser antes que "hasta".');
-  try {
-    const n = agregarBloqueos([{ fecha: $('#blq-fecha').value, staffId: $('#blq-staff').value || null, desde, hasta, motivo: $('#blq-motivo').value.trim() }]);
-    if (n) e.target.reset();
-    renderAll();
-  } catch (err) { avisar(err.message, 'error'); }
+  conBoton(e.target.querySelector('button'), async () => {
+    const r = await bloquear('bloqueos', { lista: [{ fecha: $('#blq-fecha').value, staffId: $('#blq-staff').value || null, desde, hasta, motivo: $('#blq-motivo').value.trim() }] });
+    if (r) { e.target.reset(); avisarOk('Bloqueo agregado.'); }
+  });
 });
-$('#btn-feriados').addEventListener('click', () => {
-  const y = Number($('#anio-feriados').value);
-  if (!(y >= 2000 && y <= 2100)) return avisar('Año inválido');
-  try { const n = agregarBloqueos(feriadosArgentina(y)); if (n) avisarOk(`${n} feriados cargados para ${y}. Los feriados trasladables cargalos a mano.`); renderAll(); }
-  catch (err) { avisar(err.message, 'error'); }
+$('#btn-feriados').addEventListener('click', e => {
+  const anio = Number($('#anio-feriados').value);
+  if (!(anio >= 2000 && anio <= 2100)) return avisar('Año inválido');
+  conBoton(e.currentTarget, async () => {
+    const r = await bloquear('feriados', { anio });
+    if (r) avisarOk(`${r.agregados} feriados cargados para ${anio}. Los feriados trasladables cargalos a mano.`);
+  });
 });
 
 function moverReloj(v) {
-  DB.config.relojOffsetMs = v === 'reset' ? 0 : DB.config.relojOffsetMs + Number(v);
-  auditar('Movió el reloj simulado a ' + ahora().toLocaleString('es-AR'));
-  save(); actualizarLimitesFecha(); tick();
+  conBoton(null, () => adminApi('reloj', v === 'reset' ? { reset: true } : { sumarMs: Number(v) }));
 }
-$('#btn-reloj-set').addEventListener('click', () => {
+$('#btn-reloj-set').addEventListener('click', e => {
   const v = $('#reloj-set').value; if (!v) return;
-  DB.config.relojOffsetMs = new Date(v).getTime() - Date.now();
-  save(); actualizarLimitesFecha(); tick();
+  conBoton(e.currentTarget, () => adminApi('reloj', { irA: v }));
 });
 
 $('#btn-csv').addEventListener('click', () => {
@@ -1782,46 +1220,59 @@ $('#inp-import').addEventListener('change', async e => {
   try {
     const d = JSON.parse(await f.text());
     if (!Array.isArray(d.turnos) || !Array.isArray(d.staff) || !d.config) throw new Error('El archivo no es un respaldo válido.');
-    if (!confirm(`Se reemplazarán TODOS los datos actuales por el respaldo (${d.turnos.length} turnos). ¿Continuar?`)) return;
-    DB = migrar(d); auditar('Restauró un respaldo'); save(); renderAll(); avisarOk('Respaldo restaurado.');
+    if (confirm(`Se reemplazarán TODOS los datos actuales por el respaldo (${d.turnos.length} turnos). ¿Continuar?`))
+      await conBoton(null, async () => { await adminApi('importar', { datos: d }); avisarOk('Respaldo restaurado.'); });
   } catch (err) { avisar(err.message, 'error'); }
   e.target.value = '';
 });
-$('#btn-demo').addEventListener('click', () => { const r = generarDemo(); renderAll(); avisarOk(`Generados ${r.fut} turnos futuros y ${r.pas} pasados.`); });
-$('#btn-reset').addEventListener('click', () => {
-  if (!confirm('¿Borrar absolutamente todo?')) return;
-  DB = seed(); save(); sessionStorage.removeItem('carranza_admin'); renderAll(); mostrar('admin');
+$('#btn-demo').addEventListener('click', e => conBoton(e.currentTarget, async () => {
+  const r = await adminApi('demo'); avisarOk(`Generados ${r.fut} turnos futuros y ${r.pas} pasados.`);
+}));
+$('#btn-reset').addEventListener('click', e => {
+  if (!confirm('¿Borrar absolutamente TODOS los turnos, clientes y configuración?')) return;
+  if (prompt('Escribí BORRAR para confirmar') !== 'BORRAR') return;
+  conBoton(e.currentTarget, async () => { await adminApi('reset'); avisarOk('Datos reiniciados.'); });
 });
 $('#btn-notif-perm').addEventListener('click', async () => {
   if (!('Notification' in window)) return avisar('Este navegador no soporta notificaciones.');
   avisar('Permiso: ' + await Notification.requestPermission());
 });
-$('#btn-notif-limpiar').addEventListener('click', () => { DB.notificaciones = []; save(); renderAdminDinamico(); });
+$('#btn-notif-limpiar').addEventListener('click', e => conBoton(e.currentTarget, () => adminApi('notif_limpiar')));
 
 /* ---- Delegación de clics para todos los botones generados dinámicamente ---- */
+const turnoLocal = id => turnosConocidos[id] || (DB.publico ? null : DB.turnos.find(t => t.id === id));
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act],[data-espera],[data-reloj]');
   if (!el) return;
-  try {
-    if (el.dataset.espera !== undefined) return abrirEspera(el.dataset.espera);
-    if (el.dataset.reloj !== undefined) return moverReloj(el.dataset.reloj);
-    const id = el.dataset.id;
-    recargar();
-    switch (el.dataset.act) {
-      case 'ics': { const t = getTurno(id); descargar(`turno-${t.codigo}.ics`, generarICS(t), 'text/calendar'); break; }
+  if (el.dataset.espera !== undefined) return abrirEspera(el.dataset.espera);
+  if (el.dataset.reloj !== undefined) return moverReloj(el.dataset.reloj);
+  const id = el.dataset.id;
+  const act = el.dataset.act;
+  if (act === 'staff-editar') { llenarFormStaff(DB.staff.find(s => s.id === id)); $('#f-staff').scrollIntoView({ block: 'center' }); return; }
+  if (act === 'ics') { const t = turnoLocal(id); if (t) descargar(`turno-${t.codigo}.ics`, generarICS(t), 'text/calendar'); return; }
+  if (act === 'adm-ver') {
+    const t = getTurno(id);
+    return avisar(`${t.historial.map(h => fechaHora(h.en) + ' · ' + h.accion).join('\n')}${t.notas ? '\nNotas: ' + t.notas : ''}`, 'info', `${t.codigo} — ${t.cliente.nombre}`);
+  }
+  conBoton(el, async () => {
+    switch (act) {
       case 'cli-cancelar': {
-        const t = getTurno(id);
-        const cod = prompt(`Para cancelar escribí el código del turno (${t.codigo.slice(0, 3)}...):`);
-        if (cod === null) break;
-        if (cod.trim().toUpperCase() !== t.codigo) throw new Error('El código no coincide.');
-        cancelarTurno(id, 'cliente', prompt('Motivo (opcional):') || '');
+        const t = turnoLocal(id);
+        const codigo = prompt(`Para cancelar escribí el código del turno (te lo dimos al reservar, empieza con ${t.codigo.slice(0, 3)}):`);
+        if (codigo === null) return;
+        await api('cancelar', { id, codigo, tel: misTurnos.tel, motivo: prompt('Motivo (opcional):') || '' });
         avisarOk('Turno cancelado.');
-        break;
+        await buscarMisTurnos();
+        return;
       }
       case 'cli-reprog': case 'adm-reprog': {
-        const t = getTurno(id);
-        if (el.dataset.act === 'cli-reprog') verificarPolitica(t, 'reprogramar');
-        reprogramandoId = id;
+        let t;
+        if (act === 'cli-reprog') {
+          const codigo = prompt('Escribí el código del turno para reprogramarlo:');
+          if (codigo === null) return;
+          t = (await api('verificar_turno', { id, codigo, tel: misTurnos.tel })).turno;
+          reprog = { id, codigo, tel: misTurnos.tel };
+        } else { t = getTurno(id); reprog = { id }; }
         $('#reprog-codigo').textContent = t.codigo;
         $('#modo-reprog').hidden = false;
         renderServicios();
@@ -1830,68 +1281,62 @@ document.addEventListener('click', e => {
         $('#fecha').value = t.fecha;
         $('#nombre').value = t.cliente.nombre; $('#telefono').value = t.cliente.telefono; $('#email').value = t.cliente.email || '';
         location.hash = 'reservar';
-        refrescarReserva();
-        break;
+        return;
       }
-      case 'esp-aceptar': { const t = aceptarOferta(id, $('#esp-tel').value); avisarOk('¡Listo! Turno ' + t.codigo + ' confirmado.'); break; }
-      case 'esp-rechazar': if (confirm('¿Confirmás?')) rechazarOferta(id, $('#esp-tel').value); break;
-      case 'adm-cancelar': { const m = prompt('Motivo de la cancelación (se le informa al cliente):'); if (m !== null) cancelarTurno(id, 'admin', m); break; }
-      case 'adm-completar': cambiarEstadoAdmin(id, 'completada'); break;
-      case 'adm-ausente': if (confirm('¿Marcar que el cliente NO vino?')) cambiarEstadoAdmin(id, 'ausente'); break;
-      case 'adm-ver': { const t = getTurno(id); avisar(`${t.codigo} — ${t.cliente.nombre}\n${t.historial.map(h => fechaHora(h.en) + ' · ' + h.accion).join('\n')}${t.notas ? '\nNotas: ' + t.notas : ''}`); break; }
-      case 'adm-esp-quitar': { const x = getEspera(id); x.estado = 'cancelada'; auditar('Quitó de espera a ' + x.cliente.nombre); save(); procesarListaEspera(x.fecha); break; }
-      case 'blq-borrar': {
-        const b = DB.bloqueos.find(x => x.id === id);
-        DB.bloqueos = DB.bloqueos.filter(x => x.id !== id);
-        auditar(`Quitó bloqueo ${b.fecha} ${b.motivo}`); save();
-        procesarListaEspera(b.fecha);   // se abrió agenda: quizá alguien espera ese día
-        break;
-      }
+      case 'esp-aceptar': { const { turno } = await api('espera_aceptar', { id, tel: miEspera.tel }); turnosConocidos[turno.id] = turno; avisarOk('¡Listo! Turno ' + turno.codigo + ' confirmado.'); await buscarMiEspera(); return; }
+      case 'esp-rechazar': if (confirm('¿Confirmás?')) { await api('espera_rechazar', { id, tel: miEspera.tel }); await buscarMiEspera(); } return;
+      case 'adm-cancelar': { const m = prompt('Motivo de la cancelación (se le informa al cliente):'); if (m !== null) await adminApi('cancelar', { id, motivo: m }); return; }
+      case 'adm-completar': await adminApi('completar', { id }); return;
+      case 'adm-ausente': if (confirm('¿Marcar que el cliente NO vino?')) await adminApi('ausente', { id }); return;
+      case 'adm-esp-quitar': await adminApi('espera_quitar', { id }); return;
+      case 'blq-borrar': await adminApi('bloqueo_borrar', { id }); return;
       case 'svc-guardar': {
-        const fila = el.closest('tr'), s = DB.servicios.find(x => x.id === id);
-        const precio = Number(fila.querySelector('[name=precio]').value), dur = Number(fila.querySelector('[name=duracion]').value);
-        if (!(precio >= 0) || !(dur >= 5)) throw new Error('Precio o duración inválidos.');
-        Object.assign(s, { nombre: fila.querySelector('[name=nombre]').value.trim() || s.nombre, precio, duracion: dur });
-        auditar('Editó servicio ' + s.nombre); save(); break;
+        const fila = el.closest('tr');
+        await adminApi('servicio_editar', { id, nombre: fila.querySelector('[name=nombre]').value,
+          precio: fila.querySelector('[name=precio]').value, duracion: fila.querySelector('[name=duracion]').value });
+        avisarOk('Servicio actualizado.'); return;
       }
-      case 'svc-toggle': { const s = DB.servicios.find(x => x.id === id); s.activo = !s.activo; auditar(`${s.activo ? 'Activó' : 'Desactivó'} servicio ${s.nombre}`); save(); break; }
-      case 'staff-editar': llenarFormStaff(DB.staff.find(s => s.id === id)); $('#f-staff').scrollIntoView(); return;
-      case 'cup-toggle': { const c = DB.cupones[id]; c.activo = !c.activo; save(); break; }
-      case 'cup-borrar': if (confirm('¿Borrar cupón?')) { auditar('Borró cupón ' + DB.cupones[id].codigo); DB.cupones.splice(id, 1); save(); } break;
-      case 'cli-bloqueo': {
-        const ec = estadoCliente(id);
-        DB.clientes[id] = ec.bloqueado ? 'permitido' : 'bloqueado';
-        auditar(`${ec.bloqueado ? 'Desbloqueó' : 'Bloqueó'} al cliente ${id}`); save(); break;
-      }
-      default: return;
+      case 'svc-toggle': await adminApi('servicio_toggle', { id }); return;
+      case 'cup-toggle': await adminApi('cupon_toggle', { codigo: id }); return;
+      case 'cup-borrar': if (confirm('¿Borrar cupón?')) await adminApi('cupon_borrar', { codigo: id }); return;
+      case 'cli-bloqueo': await adminApi('cliente_toggle', { tel: id }); return;
     }
-    renderAll();
-  } catch (err) { avisar(err.message, 'error'); renderAll(); }
+  });
 });
 
 /* ---- Render global ---- */
-function renderReloj() { $('#reloj').textContent = ahora().toLocaleString('es-AR', { dateStyle: 'full', timeStyle: 'short' }) + (DB.config.relojOffsetMs ? ' (simulada)' : ''); }
+function renderReloj() { $('#reloj').textContent = ahoraTexto() + (DB.config.relojOffsetMs ? ' (simulada)' : ''); }
 function renderDinamico() {
-  renderReloj(); renderSlots();
-  if ($('#mis-tel').value) renderMisTurnos();
-  if ($('#esp-tel').value) renderMiEspera();
+  if (!DB) return;
+  renderReloj(); renderSlots(); renderMisTurnos(); renderMiEspera();
+  $('#nav-admin').hidden = !esAdmin();
   if (esAdmin() && !$('#v-admin').hidden) renderAdminDinamico();
 }
 function renderAll() {
+  if (!DB) return;
   actualizarLimitesFecha();
   renderServicios(); renderStaffSelect(); renderResumen();
   if (esAdmin() && !$('#v-admin').hidden) renderAdminEstatico();
   renderDinamico();
 }
 
-/* ============ 10. ARRANQUE ============ */
-DB = load();
-save();
-renderAll();
-mostrar(location.hash.slice(1));
-tick();
-setInterval(tick, 15000);
-console.log('%cPeluquería Carranza: sistema iniciado. Admin: agregá #admin a la URL (PIN inicial 1234).', 'font-weight:bold');
+/* ============ ARRANQUE ============ */
+(async function iniciar() {
+  try { const c = JSON.parse(localStorage.getItem('carranza_cliente') || 'null'); if (c) { $('#nombre').value = c.nombre || ''; $('#telefono').value = c.telefono || ''; $('#email').value = c.email || ''; $('#mis-tel').value = $('#esp-tel').value = normTel(c.telefono); } } catch (e) { /* */ }
+  await refrescar();
+  while (!DB) {   // sin conexión: reintentar cada 4 s
+    $('#cargando').textContent = 'No pudimos conectar con el servidor. Reintentando…';
+    await new Promise(r => setTimeout(r, 4000));
+    await refrescar();
+  }
+  $('#cargando').hidden = true;
+  $('#app').hidden = false;
+  renderAll();
+  mostrar(location.hash.slice(1));
+  // Cada 20 s se pide el estado: así se ven las reservas de otros y corre el scheduler del servidor
+  setInterval(async () => { if (document.visibilityState === 'visible') { await refrescar(); renderDinamico(); } }, 20000);
+  document.addEventListener('visibilitychange', async () => { if (document.visibilityState === 'visible') { await refrescar(); renderAll(); } });
+})();
 </script>
 </body>
 </html>
