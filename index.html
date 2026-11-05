@@ -102,6 +102,10 @@ main.wrap{flex:1;padding-top:28px;padding-bottom:56px}
 .spin{display:inline-block;width:16px;height:16px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:girar .7s linear infinite;vertical-align:-3px}
 @keyframes girar{to{transform:rotate(360deg)}}
 #cargando .spin{width:28px;height:28px;color:var(--accent)}
+.guia{margin:6px 0 12px 20px;padding:0;line-height:1.6}
+.guia li{margin-bottom:8px}
+.guia code{background:var(--surface-2);padding:1px 6px;border-radius:6px}
+#panel details.avanzado{border-style:dashed}
 .res-nota{font-size:.78rem;color:var(--ink-3);text-align:center;margin-top:10px}
 
 /* ---------- Tarjetas de paso (fieldset) ---------- */
@@ -353,7 +357,7 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
     <fieldset><legend><span class="step">1</span> Servicios <small>Podés combinar varios</small></legend>
       <div id="lista-servicios"></div>
     </fieldset>
-    <fieldset><legend><span class="step">2</span> Profesional</legend>
+    <fieldset id="paso-prof"><legend><span class="step">2</span> Profesional</legend>
       <div class="inline"><select id="sel-staff" aria-label="Profesional"></select> <span id="staff-info"></span></div>
     </fieldset>
     <fieldset><legend><span class="step">3</span> Fecha</legend>
@@ -449,27 +453,35 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
       <button type="button" id="btn-logout">Cerrar sesión</button>
     </div>
 
-    <details><summary><b>Reloj simulado</b> (solo para pruebas: afecta a TODOS los usuarios)</summary>
-      <p id="adm-reloj"></p>
-      <button type="button" data-reloj="3600000">+1 hora</button>
-      <button type="button" data-reloj="21600000">+6 horas</button>
-      <button type="button" data-reloj="86400000">+1 día</button>
-      <input type="datetime-local" id="reloj-set"> <button type="button" id="btn-reloj-set">Ir a esa fecha/hora</button>
-      <button type="button" data-reloj="reset">Volver a la hora real</button>
+    <details id="guia" open>
+      <summary><b>📖 Guía rápida para el dueño</b> (tocá para ocultar)</summary>
+      <ol class="guia">
+        <li><b>Entrar:</b> con el PIN de administrador. Para volver a esta pantalla más tarde, escribí <code>#admin</code> al final de la dirección de la página.</li>
+        <li><b>Ver cómo viene el día:</b> en <i>Hoy: turnos y ganancias</i> ves cuánto entra, cuántos turnos hay y qué queda libre.</li>
+        <li><b>Cambiar precios o agregar servicios:</b> en <i>✂️ Servicios y precios</i> editás precio y minutos y tocás <b>Guardar</b>. Para un servicio que no hacés, tocá <b>Desactivar</b>: deja de aparecer para los clientes, pero los turnos viejos no se tocan.</li>
+        <li><b>Cambiar tu horario:</b> en <i>💈 Mi horario de atención</i> ponés los días y las horas en que atendés, y los servicios que hacés.</li>
+        <li><b>Abrir o cerrar la agenda:</b> en <i>⚙️ Configuración</i> ponés la hora de apertura y cierre, el horario de almuerzo y los días que abrís.</li>
+        <li><b>Cerrar un día</b> (feriado, vacaciones): en <i>🚫 Días cerrados</i> elegís la fecha, escribís el motivo y tocás <b>Agregar</b>. Si ya había turnos ese día, el sistema te pregunta antes y avisa a esos clientes. Los feriados del año se cargan con un solo botón.</li>
+        <li><b>Cancelar un turno:</b> en <i>📅 Todos los turnos</i> buscás al cliente, tocás <b>Cancelar</b> y escribís el motivo. El cliente recibe el aviso y el horario queda libre para la lista de espera.</li>
+        <li><b>Marcar que no vino:</b> cuando pasa la hora del turno, tocá <b>No vino</b>. Si un cliente acumula 3 ausencias, no puede reservar online (podés desbloquearlo en <i>👥 Clientes</i>).</li>
+        <li><b>Descuentos:</b> en <i>🏷️ Cupones</i> creás un código con su porcentaje. Podés limitarlo a ciertos días o a una cantidad de usos.</li>
+        <li><b>Copia de seguridad:</b> una vez por semana, en <i>💾 Copia de seguridad</i>, tocá <b>Descargar</b> y guardá el archivo.</li>
+      </ol>
+      <p class="hint"><b>Palabras clave:</b> <i>Turno</i> = una reserva. <i>Ocupado</i> = horario ya reservado. <i>Lista de espera</i> = clientes anotados para cuando se libere un lugar. <i>Bloqueo</i> = un horario o día que no se puede reservar.</p>
     </details>
 
-    <details open><summary><b>Resumen y ganancias del día</b></summary>
+    <details open><summary><b>📊 Hoy: turnos y ganancias</b></summary>
       <label>Día <input type="date" id="adm-fecha"></label>
       <div id="adm-resumen"></div>
       <h4>Agenda del día</h4>
       <div id="adm-agenda"></div>
     </details>
 
-    <details><summary><b>Estadísticas (últimos 30 días)</b></summary>
+    <details><summary><b>📈 Estadísticas de los últimos 30 días</b></summary>
       <div id="adm-stats"></div>
     </details>
 
-    <details open><summary><b>Historial de turnos</b></summary>
+    <details open><summary><b>📅 Todos los turnos (buscar, cancelar, marcar)</b></summary>
       <form id="f-filtros">
         <label>Desde <input type="date" id="fil-desde"></label>
         <label>Hasta <input type="date" id="fil-hasta"></label>
@@ -483,10 +495,10 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
       <div id="adm-historial"></div>
     </details>
 
-    <details><summary><b>Días festivos y bloqueos de agenda</b></summary>
+    <details><summary><b>🚫 Días cerrados y horarios bloqueados</b></summary>
       <form id="f-bloqueo">
         <label>Fecha <input type="date" id="blq-fecha" required></label>
-        <label>Quién <select id="blq-staff"></select></label>
+        <label>Qué cerrar <select id="blq-staff"></select></label>
         <label>Desde <input type="time" id="blq-desde"></label>
         <label>Hasta <input type="time" id="blq-hasta"></label>
         (sin horas = día completo)
@@ -500,29 +512,29 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
       <div id="adm-bloqueos"></div>
     </details>
 
-    <details><summary><b>Lista de espera (todas)</b></summary>
+    <details><summary><b>⏳ Lista de espera</b></summary>
       <div id="adm-espera"></div>
     </details>
 
-    <details><summary><b>Clientes</b></summary>
+    <details><summary><b>👥 Clientes</b></summary>
       <div id="adm-clientes"></div>
     </details>
 
-    <details><summary><b>Servicios, precios y duraciones</b></summary>
+    <details open><summary><b>✂️ Servicios y precios</b></summary>
       <div id="adm-servicios"></div>
       <form id="f-servicio">
-        Nuevo servicio:
-        <input id="svc-nombre" placeholder="Nombre" required>
+        <b>Agregar un servicio nuevo:</b>
+        <input id="svc-nombre" placeholder="Nombre (ej: Corte con diseño)" required>
         <input id="svc-precio" type="number" min="0" placeholder="Precio" required>
         <input id="svc-dur" type="number" min="5" step="5" placeholder="Minutos" required>
         <button>Agregar</button>
       </form>
     </details>
 
-    <details><summary><b>Profesionales y sus agendas</b></summary>
+    <details open><summary><b>💈 Mi horario de atención</b></summary>
       <div id="adm-staff"></div>
       <form id="f-staff">
-        <fieldset><legend id="staff-legend">Nuevo profesional</legend>
+        <fieldset><legend id="staff-legend">Mi horario</legend>
           <input type="hidden" id="stf-id">
           <label>Nombre <input id="stf-nombre" required></label><br>
           Días: <span id="stf-dias"></span><br>
@@ -531,12 +543,12 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
           Servicios que realiza: <span id="stf-servicios"></span><br>
           <label><input type="checkbox" id="stf-activo" checked> Activo</label><br>
           <button>Guardar profesional</button>
-          <button type="button" id="btn-stf-nuevo">Limpiar / nuevo</button>
+          <button type="button" id="btn-stf-nuevo">Deshacer cambios</button>
         </fieldset>
       </form>
     </details>
 
-    <details><summary><b>Cupones de descuento</b></summary>
+    <details><summary><b>🏷️ Cupones de descuento</b></summary>
       <div id="adm-cupones"></div>
       <form id="f-cupon">
         <input id="cup-codigo" placeholder="CÓDIGO" required>
@@ -547,25 +559,37 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
       </form>
     </details>
 
-    <details><summary><b>Configuración general</b></summary>
+    <details><summary><b>⚙️ Configuración (horarios, PIN, avisos)</b></summary>
       <form id="f-config"><div id="cfg-campos"></div><button>Guardar configuración</button></form>
     </details>
 
-    <details><summary><b>Notificaciones enviadas (simuladas)</b></summary>
+    <details><summary><b>🔔 Mensajes enviados a clientes (registro)</b></summary>
       <button type="button" id="btn-notif-perm">Activar notificaciones nativas del navegador</button>
       <button type="button" id="btn-notif-limpiar">Vaciar registro</button>
       <div id="adm-notif"></div>
     </details>
 
-    <details><summary><b>Auditoría de acciones</b></summary>
+    <details><summary><b>🧾 Quién hizo qué (registro de cambios)</b></summary>
       <div id="adm-audit"></div>
     </details>
 
-    <details><summary><b>Datos y respaldo</b></summary>
-      <button type="button" id="btn-export">Descargar respaldo (.json)</button>
-      <label>Restaurar respaldo <input type="file" id="inp-import" accept=".json,application/json"></label><br>
+    <details><summary><b>💾 Copia de seguridad</b></summary>
+      <p class="hint">Descargá una copia cada semana. Si algo se rompe, con esta copia se restaura todo.</p>
+      <button type="button" id="btn-export">Descargar copia (.json)</button>
+      <label>Restaurar una copia <input type="file" id="inp-import" accept=".json,application/json"></label>
+    </details>
+
+    <details class="avanzado"><summary><b>🧪 Pruebas (avanzado)</b> · no usar con clientes reales</summary>
+      <p class="hint"><b>Atención:</b> estas herramientas afectan a todos los que usan la página.</p>
+      <p id="adm-reloj"></p>
+      <button type="button" data-reloj="3600000">Adelantar 1 hora</button>
+      <button type="button" data-reloj="21600000">Adelantar 6 horas</button>
+      <button type="button" data-reloj="86400000">Adelantar 1 día</button>
+      <input type="datetime-local" id="reloj-set"> <button type="button" id="btn-reloj-set">Ir a esa fecha y hora</button>
+      <button type="button" data-reloj="reset">Volver a la hora real</button>
+      <hr>
       <button type="button" id="btn-demo">Generar turnos de prueba</button>
-      <button type="button" id="btn-reset">Borrar TODO y volver a datos iniciales</button>
+      <button type="button" id="btn-reset">Borrar TODO y volver a empezar</button>
     </details>
   </div>
 </section>
@@ -724,6 +748,7 @@ function renderStaffSelect() {
     (ids.length ? capaces : DB.staff.filter(s => s.activo)).map(s => `<option value="${s.id}">${esc(s.nombre)}</option>`).join('');
   if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
   const st = DB.staff.find(s => s.id === sel.value);
+  $('#paso-prof').hidden = DB.staff.filter(s => s.activo).length <= 1;
   $('#staff-info').textContent = ids.length && !capaces.length
     ? 'Ningún profesional hace esa combinación. Sacá dos turnos por separado.'
     : st ? `Atiende ${st.dias.map(d => DIAS[d]).join(', ')} de ${st.desde} a ${st.hasta}.` : 'Se asigna al profesional libre con menos carga.';
@@ -954,7 +979,7 @@ function renderAdminEstatico() {
     <tr><td>${esc(s.nombre)}</td><td>${s.dias.map(d => DIAS[d]).join(', ')}</td><td>${s.desde}–${s.hasta}</td>
     <td>${s.servicios.map(id => esc((DB.servicios.find(x => x.id === id) || {}).nombre || id)).join(', ')}</td><td>${badge(s.activo ? 'ok' : 'expirada').replace(/>(ok|expirada)</, '>' + (s.activo ? 'activo' : 'inactivo') + '<')}</td>
     <td><button type="button" data-act="staff-editar" data-id="${s.id}">Editar</button></td></tr>`).join('')}</table>`;
-  if (!$('#stf-id').value) llenarFormStaff(null);
+  if (!$('#stf-id').value) llenarFormStaff(DB.staff[0] || null);
 
   const opcionesStaff = DB.staff.map(s => `<option value="${s.id}">${esc(s.nombre)}</option>`).join('');
   const fs = $('#fil-staff').value; $('#fil-staff').innerHTML = '<option value="">Todos</option>' + opcionesStaff; $('#fil-staff').value = fs;
@@ -971,7 +996,7 @@ function renderAdminEstatico() {
 
 function llenarFormStaff(st) {
   $('#stf-id').value = st ? st.id : '';
-  $('#staff-legend').textContent = st ? 'Editando: ' + st.nombre : 'Nuevo profesional';
+  $('#staff-legend').textContent = st ? 'Mi horario: ' + st.nombre : 'Mi horario';
   $('#stf-nombre').value = st ? st.nombre : '';
   $('#stf-dias').innerHTML = checkboxesDias('stf-dia', st ? st.dias : [1, 2, 3, 4, 5]);
   $('#stf-desde').value = st ? st.desde : DB.config.apertura;
@@ -1155,12 +1180,12 @@ $('#f-staff').addEventListener('submit', e => {
   };
   conBoton(e.target.querySelector('button:not([type=button])'), async () => {
     const r = await adminApi('staff_guardar', { staff });
-    llenarFormStaff(null);
+    llenarFormStaff(DB.staff[0]);
     avisarOk('Profesional guardado.');
     if (r.fuera.length) avisar(`Atención: ${r.fuera.length} turno(s) futuros quedan fuera de su nueva disponibilidad: ${r.fuera.join(', ')}. Cancelalos o reprogramalos desde el historial.`);
   });
 });
-$('#btn-stf-nuevo').addEventListener('click', () => llenarFormStaff(null));
+$('#btn-stf-nuevo').addEventListener('click', () => llenarFormStaff(DB.staff[0]));
 
 $('#f-cupon').addEventListener('submit', e => {
   e.preventDefault();
