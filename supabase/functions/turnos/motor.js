@@ -100,12 +100,8 @@ function seed() {
       { id: 'infantil', nombre: 'Corte infantil',  precio: 6000,  duracion: 25,  activo: true }
     ],
     staff: [
-      { id: 's1', nombre: 'Jorge', dias: [1, 2, 3, 4, 5, 6], desde: '09:00', hasta: '18:00',
-        servicios: ['corte', 'barba', 'lavado', 'infantil'], activo: true },
-      { id: 's2', nombre: 'Lucía', dias: [2, 3, 4, 5, 6], desde: '10:00', hasta: '20:00',
-        servicios: ['corte', 'lavado', 'color', 'mechas', 'peinado', 'alisado'], activo: true },
-      { id: 's3', nombre: 'Matías', dias: [1, 3, 5, 6], desde: '09:00', hasta: '17:00',
-        servicios: ['corte', 'barba', 'lavado', 'color', 'infantil'], activo: true }
+      { id: 'carranza', nombre: 'Carranza', dias: [1, 2, 3, 4, 5, 6], desde: '09:00', hasta: '20:00',
+        servicios: ['corte', 'barba', 'lavado', 'color', 'mechas', 'peinado', 'alisado', 'infantil'], activo: true }
     ],
     turnos: [],
     bloqueos: [],        // {id, fecha, staffId|null, desde|null, hasta|null, motivo}
