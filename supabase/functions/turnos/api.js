@@ -1,5 +1,5 @@
 /* =====================================================================
-   PELUQUERÍA CARRANZA — API (lógica del servidor, sin E/S)
+   BARBERÍA CARRANZA — API (lógica del servidor, sin E/S)
    manejar(estado, accion, payload) → { db, respuesta }
    • Corre el scheduler (recordatorios, vencimientos) en cada llamada.
    • Valida TODO con el motor antes de modificar.
@@ -183,7 +183,7 @@ function accionAdmin(op, a) {
     case 'reloj': {
       if (a.reset) D.config.relojOffsetMs = 0;
       else if (a.irA) {
-        const objetivo = Date.parse(texto(a.irA, 16) + ':00Z');   // "YYYY-MM-DDTHH:MM" en hora de la peluquería
+        const objetivo = Date.parse(texto(a.irA, 16) + ':00Z');   // "YYYY-MM-DDTHH:MM" en hora de la barbería
         if (!Number.isFinite(objetivo)) throw new Error('Fecha inválida.');
         D.config.relojOffsetMs = objetivo - M.relojDePared(Date.now(), D.config.zonaHoraria || M.ZONA_DEFECTO);
       } else D.config.relojOffsetMs = (D.config.relojOffsetMs || 0) + Number(a.sumarMs || 0);

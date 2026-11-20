@@ -1,5 +1,5 @@
 // =====================================================================
-// PELUQUERÍA CARRANZA — Edge Function "turnos" (Supabase / Deno)
+// BARBERÍA CARRANZA — Edge Function "turnos" (Supabase / Deno)
 // Único punto de entrada de la web. Lee el estado de la tabla app_estado,
 // ejecuta la acción con el motor (api.js + motor.js) y guarda con control
 // de versión optimista: si otra persona guardó en el medio, se reintenta,

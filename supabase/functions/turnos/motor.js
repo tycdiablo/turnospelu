@@ -1,5 +1,5 @@
 /* =====================================================================
-   PELUQUERÍA CARRANZA — MOTOR DE AGENDA (compartido)
+   BARBERÍA CARRANZA — MOTOR DE AGENDA (compartido)
    Este mismo archivo lo usan:
      • el navegador (index.html) para MOSTRAR horarios libres al instante, y
      • la Edge Function de Supabase (index.ts) para VALIDAR y GUARDAR.
@@ -22,7 +22,7 @@ const normTel = t => String(t || '').replace(/\D/g, '');
 
 // ---------------------------------------------------------------------------
 // HORA "DE PARED": el servidor corre en UTC y el celular del cliente en su zona.
-// Para que todos calculen igual, se representa la hora local de la peluquería
+// Para que todos calculen igual, se representa la hora local de la barbería
 // (America/Argentina/Buenos_Aires) DENTRO de los campos UTC de un Date y se usan
 // siempre getters UTC. Así "10:30 en Buenos Aires" es getUTCHours() === 10 en
 // cualquier máquina del mundo.
@@ -152,7 +152,7 @@ function motivoDiaCerrado(fecha, st, ignorarRango) {
     if (fecha > sumarDias(hoy, DB.config.maxDiasAdelanto)) return `Solo se reserva hasta ${DB.config.maxDiasAdelanto} días adelante.`;
   }
   const dw = diaSemana(fecha);
-  if (!DB.config.diasLaborales.includes(dw)) return 'La peluquería no abre los ' + DIAS[dw] + '.';
+  if (!DB.config.diasLaborales.includes(dw)) return 'La barbería no abre los ' + DIAS[dw] + '.';
   const fer = DB.bloqueos.find(b => b.fecha === fecha && !b.staffId && b.desde == null);
   if (fer) return 'Cerrado: ' + fer.motivo;
   if (st) {
@@ -361,7 +361,7 @@ function cancelarTurno(id, por, motivo) {
   if (por === 'admin') auditar(`Canceló ${t.codigo} (${motivo || 'sin motivo'})`);
   save();
   notificar('cancelacion', t.cliente, `Tu turno ${t.codigo} del ${fechaLarga(t.fecha)} ${toHHMM(t.inicio)} fue CANCELADO${motivo ? ' (' + motivo + ')' : ''}.`);
-  if (por === 'cliente') notificar('aviso_local', { nombre: 'Peluquería', telefono: 'local' }, `El cliente ${t.cliente.nombre} canceló ${t.codigo} (${toHHMM(t.inicio)} con ${staffNombre(t.staffId)}).`);
+  if (por === 'cliente') notificar('aviso_local', { nombre: 'Barbería', telefono: 'local' }, `El cliente ${t.cliente.nombre} canceló ${t.codigo} (${toHHMM(t.inicio)} con ${staffNombre(t.staffId)}).`);
   procesarListaEspera(t.fecha);   // ¡se liberó un lugar!
   return t;
 }
@@ -404,21 +404,21 @@ function cambiarEstadoAdmin(id, estado) {
   save();
   const ec = estadoCliente(t.cliente.telefono);
   if (estado === 'ausente' && ec.bloqueado)
-    notificar('aviso_local', { nombre: 'Peluquería', telefono: 'local' }, `${t.cliente.nombre} (${t.cliente.telefono}) quedó BLOQUEADO para reservas online por ${ec.ausencias} ausencias.`);
+    notificar('aviso_local', { nombre: 'Barbería', telefono: 'local' }, `${t.cliente.nombre} (${t.cliente.telefono}) quedó BLOQUEADO para reservas online por ${ec.ausencias} ausencias.`);
 }
 
 function generarICS(t) {
   const d = turnoDate(t), f = new Date(d.getTime() + t.duracion * 60000);
   const fmt = x => `${x.getUTCFullYear()}${pad(x.getUTCMonth() + 1)}${pad(x.getUTCDate())}T${pad(x.getUTCHours())}${pad(x.getUTCMinutes())}00`;
   const utc = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Peluqueria Carranza//Turnos//ES', 'BEGIN:VEVENT',
-    `UID:${t.id}@peluqueria-carranza`, `DTSTAMP:${utc}`, `DTSTART:${fmt(d)}`, `DTEND:${fmt(f)}`,
-    `SUMMARY:Peluquería Carranza - ${t.servicioNombres.join(' + ')}`,
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Barberia Carranza//Turnos//ES', 'BEGIN:VEVENT',
+    `UID:${t.id}@barberia-carranza`, `DTSTAMP:${utc}`, `DTSTART:${fmt(d)}`, `DTEND:${fmt(f)}`,
+    `SUMMARY:Barbería Carranza - ${t.servicioNombres.join(' + ')}`,
     `DESCRIPTION:Código ${t.codigo} con ${staffNombre(t.staffId)}. Total ${money(t.total)}`,
-    'BEGIN:VALARM', 'TRIGGER:-PT24H', 'ACTION:DISPLAY', 'DESCRIPTION:Turno mañana en Peluquería Carranza', 'END:VALARM',
+    'BEGIN:VALARM', 'TRIGGER:-PT24H', 'ACTION:DISPLAY', 'DESCRIPTION:Turno mañana en Barbería Carranza', 'END:VALARM',
     'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
 }
-const linkWhatsApp = t => 'https://wa.me/?text=' + encodeURIComponent('Mi turno en Peluquería Carranza: ' + datosTurnoTexto(t));
+const linkWhatsApp = t => 'https://wa.me/?text=' + encodeURIComponent('Mi turno en Barbería Carranza: ' + datosTurnoTexto(t));
 
 /* ============ 6. LISTA DE ESPERA ============ */
 function anotarEnEspera(d) {

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Peluquería Carranza – Turnos</title>
+<title>Barbería Carranza – Turnos</title>
 <meta name="color-scheme" content="light dark">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://qenikkwknctylillsuwv.supabase.co" crossorigin>
@@ -11,7 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 /* =====================================================================
-   SISTEMA DE DISEÑO — Peluquería Carranza
+   SISTEMA DE DISEÑO — Barbería Carranza
    Paleta cálida (crema + carbón + latón), tipografía serif editorial para
    títulos (Fraunces) y sans neutra para interfaz (Inter). Modo oscuro
    automático. Todo con variables: cambiar la marca = cambiar :root.
@@ -314,11 +314,11 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
 
 <header class="topbar">
   <div class="wrap topbar-in">
-    <a class="brand" href="#reservar" aria-label="Peluquería Carranza, inicio">
+    <a class="brand" href="#reservar" aria-label="Barbería Carranza, inicio">
       <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/></svg>
       </span>
-      <span><b>Carranza</b><small>Peluquería</small></span>
+      <span><b>Carranza</b><small>Barbería</small></span>
     </a>
     <nav class="tabs" aria-label="Secciones">
       <a href="#reservar">Reservar</a>
@@ -438,7 +438,7 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
     <div class="card">
       <span class="brand-mark" style="margin:0 auto 14px" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
       <h2>Acceso dueños</h2>
-      <p class="muted">Panel de administración de la peluquería.</p>
+      <p class="muted">Panel de administración de la barbería.</p>
       <form id="f-login">
         <input type="password" id="pin" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Escribí el PIN" aria-label="PIN de administrador">
         <button class="btn-lg">Entrar</button>
@@ -596,7 +596,7 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
 
 </div>
 </main>
-<footer><div class="wrap"><span id="pie">© Peluquería Carranza</span><span>Turnos online · Lun a Sáb</span></div></footer>
+<footer><div class="wrap"><span id="pie">© Barbería Carranza</span><span>Turnos online · Lun a Sáb</span></div></footer>
 <div id="toasts" aria-live="polite"></div>
 
 <!-- URL de la API (Edge Function de Supabase). Es pública: la seguridad está en el servidor. -->
@@ -606,7 +606,7 @@ main > section:not([hidden]){animation:fadeUp .45s var(--ease)}
 <script>
 'use strict';
 /* =====================================================================
-   PELUQUERÍA CARRANZA — INTERFAZ (navegador)
+   BARBERÍA CARRANZA — INTERFAZ (navegador)
    La lógica de agenda vive en motor.js (compartido con el servidor).
    Este archivo solo: pide el estado al servidor, lo dibuja y envía acciones.
    El servidor (Supabase Edge Function) valida y guarda TODO.
@@ -659,7 +659,7 @@ async function api(accion, payload = {}) {
   if (r.estado) aplicarEstado(r.estado);
   for (const n of r.notifs || []) {
     avisar(n.mensaje, 'notif', `📩 ${ETIQUETAS[n.tipo] || n.tipo}${n.para ? ' → ' + n.para : ''}`);
-    if ('Notification' in window && Notification.permission === 'granted') { try { new Notification('Peluquería Carranza', { body: n.mensaje }); } catch (e) { /* */ } }
+    if ('Notification' in window && Notification.permission === 'granted') { try { new Notification('Barbería Carranza', { body: n.mensaje }); } catch (e) { /* */ } }
   }
   if (!r.ok) throw new Error(r.error || 'Error inesperado.');
   return r.data || {};
